@@ -1,0 +1,14 @@
+# 生成报告输出目录
+生成报告/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
