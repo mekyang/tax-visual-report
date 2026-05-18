@@ -579,6 +579,16 @@ def get_app_base_path():
         except NameError:
             return os.getcwd()
 
+def get_default_template_path():
+    """获取默认模板路径：exe 打包后从 sys._MEIPASS 读取内嵌文件，开发模式从脚本同目录读取"""
+    if getattr(sys, 'frozen', False):
+        return os.path.join(sys._MEIPASS, 'index.html')
+    else:
+        try:
+            return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'index.html')
+        except NameError:
+            return os.path.join(os.getcwd(), 'index.html')
+
 class RedirectText(object):
     def __init__(self, text_ctrl):
         self.output = text_ctrl
@@ -603,7 +613,7 @@ class ReportApp:
         self.path_12366 = tk.StringVar()
         self.path_hall = tk.StringVar()
         self.path_stats = tk.StringVar()
-        self.path_template = tk.StringVar(value=os.path.join(self.base_path, 'index.html'))
+        self.path_template = tk.StringVar(value=get_default_template_path())
         self.dir_output = tk.StringVar(value=os.path.join(self.base_path, '生成报告'))
 
         self.create_widgets()
