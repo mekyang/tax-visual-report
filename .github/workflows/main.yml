@@ -13,6 +13,7 @@ jobs:
           - os: windows-latest
             artifact: 税诉通-Windows
             pyinstaller_opts: --onefile --windowed --add-data "index.html;."
+
           - os: ubuntu-22.04-arm
             artifact: 税诉通-Linux-ARM64
             pyinstaller_opts: --onefile --add-data "index.html:."
@@ -36,19 +37,32 @@ jobs:
         shell: bash
         run: cp report-template/dist/index.html index.html
 
-      - name: Setup Python
+      - name: Setup Python (Windows)
+        if: runner.os == 'Windows'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
+      - name: Setup Miniconda (Linux ARM64)
+        if: runner.os == 'Linux'
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: '3.11'
+          channels: conda-forge,defaults
+          auto-activate-base: true
+          activate-environment: ''
+
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y python3-tk
+        shell: bash -el {0}
+        run: conda install -y tk
 
       - name: Install Python dependencies
+        shell: bash -el {0}
         run: pip install -r requirements.txt
 
       - name: Build with PyInstaller
+        shell: bash -el {0}
         run: pyinstaller ${{ matrix.pyinstaller_opts }} --name "税诉通" shengc.py
 
       - name: Upload artifact
