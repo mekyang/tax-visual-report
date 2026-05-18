@@ -30,7 +30,7 @@ jobs:
 
       - name: Build frontend
         working-directory: report-template
-        run: npm ci && npm run build
+        run: npm install && npm run build
 
       - name: Copy template to root
         shell: bash
