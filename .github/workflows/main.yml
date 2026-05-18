@@ -37,12 +37,18 @@ jobs:
         shell: bash
         run: cp report-template/dist/index.html index.html
 
+      # ---- Windows: Python 3.8 兼容 Win7 ----
       - name: Setup Python (Windows)
         if: runner.os == 'Windows'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.8'
 
+      - name: Install Python deps (Windows)
+        if: runner.os == 'Windows'
+        run: pip install pandas openpyxl xlrd pyinstaller
+
+      # ---- Linux ARM64: Conda Python 解决 glibc 兼容性 ----
       - name: Setup Miniconda (Linux ARM64)
         if: runner.os == 'Linux'
         uses: conda-incubator/setup-miniconda@v3
@@ -52,16 +58,18 @@ jobs:
           auto-activate: true
           activate-environment: base
 
-      - name: Install system dependencies (Linux)
+      - name: Install Python deps (Linux ARM64)
         if: runner.os == 'Linux'
         shell: bash -el {0}
-        run: conda install -y tk
+        run: conda install -y pandas openpyxl xlrd pyinstaller tk
 
-      - name: Install Python dependencies
-        shell: bash -el {0}
-        run: pip install -r requirements.txt
+      # ---- PyInstaller 打包 ----
+      - name: Build with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        run: pyinstaller ${{ matrix.pyinstaller_opts }} --name "税诉通" shengc.py
 
-      - name: Build with PyInstaller
+      - name: Build with PyInstaller (Linux ARM64)
+        if: runner.os == 'Linux'
         shell: bash -el {0}
         run: pyinstaller ${{ matrix.pyinstaller_opts }} --name "税诉通" shengc.py
 
