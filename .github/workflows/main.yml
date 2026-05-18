@@ -1,0 +1,60 @@
+name: Build and Package
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: 税诉通-Windows
+            pyinstaller_opts: --onefile --windowed --add-data "index.html;."
+          - os: ubuntu-22.04-arm
+            artifact: 税诉通-Linux-ARM64
+            pyinstaller_opts: --onefile --add-data "index.html:."
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        working-directory: report-template
+        run: npm ci && npm run build
+
+      - name: Copy template to root
+        shell: bash
+        run: cp report-template/dist/index.html index.html
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller ${{ matrix.pyinstaller_opts }} --name "税诉通" shengc.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/税诉通.exe
+            dist/税诉通

@@ -31,6 +31,16 @@ const formatDate = (dateStr: string | null | undefined): string => {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 };
 
+const formatRate = (rate: string | number | null | undefined): string => {
+  if (rate == null) return '--';
+  const str = String(rate).trim();
+  if (str.endsWith('%')) return str;
+  const num = parseFloat(str);
+  if (isNaN(num)) return str;
+  if (num <= 1) return `${(num * 100).toFixed(2)}%`;
+  return `${num.toFixed(2)}%`;
+};
+
 // ==========================================
 // 3. UI 基础组件
 // ==========================================
@@ -319,7 +329,7 @@ export default function CompleteDashboard() {
         <div className="max-w-[1200px] mx-auto px-6 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-              <Terminal className="text-sky-500" size={20} /> 山东税务热线咨询情况报告
+              <Terminal className="text-sky-500" size={20} /> 税诉通（山东税务热线咨询情况报告）
             </h1>
             <p className="text-xs text-slate-500 font-mono mt-1">
               系统生成报表 | 载入明细 {meta.totalRecords.toLocaleString()} 条
@@ -418,11 +428,7 @@ export default function CompleteDashboard() {
                   <span className="text-sm text-slate-500 font-medium">
                     渠道占比: <span className="font-bold text-slate-700">{item.percent}%</span>
                   </span>
-                  {item.answerRate != null && (
-                    <span className="text-sm text-slate-500 font-medium">
-                      接听率: <span className="font-bold text-sky-600">{item.answerRate}%</span>
-                    </span>
-                  )}
+
                 </div>
               </div>
             ))}
@@ -492,7 +498,7 @@ export default function CompleteDashboard() {
                       </div>
                       <div className="text-right">
                         <div className="text-xs text-slate-400">接听率</div>
-                        <div className={`font-bold ${parseFloat(cityRow.rate) < 90 ? 'text-rose-500' : 'text-emerald-600'}`}>{cityRow.rate}</div>
+                        <div className={`font-bold ${parseFloat(cityRow.rate) < 90 ? 'text-rose-500' : 'text-emerald-600'}`}>{formatRate(cityRow.rate)}</div>
                       </div>
                       <div className="text-right">
                         <div className="text-xs text-slate-400">好差评推送率</div>
@@ -528,7 +534,7 @@ export default function CompleteDashboard() {
                               <td className="py-2.5 px-3 text-right">{dist.voice.toLocaleString()}</td>
                               <td className="py-2.5 px-3 text-right text-sky-600 font-medium">{dist.human.toLocaleString()}</td>
                               <td className="py-2.5 px-3 text-right">
-                                <span className={parseFloat(dist.rate) < 90 ? 'text-rose-500 font-bold' : 'text-emerald-600 font-medium'}>{dist.rate}</span>
+                                <span className={parseFloat(dist.rate) < 90 ? 'text-rose-500 font-bold' : 'text-emerald-600 font-medium'}>{formatRate(dist.rate)}</span>
                               </td>
                               <td className="py-2.5 px-3 text-right">{dist.push}</td>
                             </tr>

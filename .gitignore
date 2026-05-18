@@ -9,6 +9,10 @@ __pycache__/
 # Claude
 .claude/
 
+# Backups
+index_backup_*.html
+
 # OS
 .DS_Store
 Thumbs.db
+*.exe

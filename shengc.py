@@ -145,7 +145,7 @@ def build_report_data(df, progress_cb=None):
         if raw_type in ('服务言行', '服务质效', '侵害权益', '表扬'):
             cat      = '服务投诉'
             raw_type = f'服务投诉->{raw_type}{"->"+lv3 if lv3 else ""}'
-        elif raw_type in ('轻微纳税人税收违法行为举报', '纳税人一般税收违法行为举报', '一般涉税违法举报'):
+        elif raw_type in ('轻微纳税人税收违法行为举报', '纳税人一般税收违法行为举报', '一般涉税违法举报', '税务机关和税务人员税收违法行政行为举报'):
             cat      = '涉税举报'
             raw_type = f'涉税举报->{raw_type}{"->"+lv3 if lv3 else ""}'
         elif raw_type == '减免政策如何规定？【减税降费】':
@@ -345,6 +345,9 @@ def build_report_data(df, progress_cb=None):
             }
         return result
 
+    # 过滤掉不需要的大类
+    EXCLUDED_CATEGORIES = {'投诉、举报工单反馈', '服务'}
+    global_type_tree = {k: v for k, v in global_type_tree.items() if k not in EXCLUDED_CATEGORIES}
     serialized_tree = serialize_tree(global_type_tree)
 
     location_list = sorted(
@@ -394,7 +397,7 @@ def parse_hall_stats(hall_file_path):
         return [], []
 
     try:
-        df = pd.read_excel(hall_file_path)
+        df = pd.read_excel(hall_file_path, engine='openpyxl')
         col_city = df.columns[0]
         col_unit = df.columns[1]
 
@@ -552,7 +555,7 @@ def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, te
             f.write(final_html)
 
         print(f"\n✅ 生成完毕！共统计明细记录 {report_data['meta']['totalRecords']} 条。")
-        print(f"📄 报告已保存至：\n{out_path}\n")
+        print(f"报告已保存至：\n{out_path}\n")
         
         if progress_cb: progress_cb(100, "生成成功！")
         return True
