@@ -1,0 +1,4 @@
+- [项目架构](project_architecture.md) — 三层结构、数据流、开发流程
+- [GitHub 仓库](reference_github.md) — 仓库地址、Actions 入口
+- [多平台打包经验](pyinstaller_github_actions.md) — PyInstaller + GitHub Actions 矩阵构建、跨平台注意事项
+- [Tkinter 踩坑](tkinter_pysintaller_pitfalls.md) — xlrd/xlsx、BMP 外 Unicode、sys._MEIPASS 路径
