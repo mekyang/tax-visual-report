@@ -18,6 +18,13 @@ SHANDONG_CITIES = [
 ]
 SPECIAL_TOPICS  = ['数电票', '减税降费', '社保费']
 COMMA_WHITELIST = ['【减税降费】', '享受"六税两费"', '器具、设备']
+INVALID_TEXT_VALUES = {'', 'nan', 'none', 'null', 'na', 'n/a', '未知细分'}
+
+def clean_text(value):
+    if value is None or pd.isna(value):
+        return ''
+    text = str(value).strip()
+    return '' if text.lower() in INVALID_TEXT_VALUES else text
 
 def read_csv_safe(file_path, header=0):
     encodings = ['utf-8-sig', 'utf-8', 'gbk', 'gb18030']
@@ -30,6 +37,7 @@ def read_csv_safe(file_path, header=0):
     return pd.read_csv(file_path, encoding='utf-8', errors='ignore', header=header, low_memory=False)
 
 def parse_location(loc):
+    loc = clean_text(loc)
     if not loc or loc == '未知': return '未知'
     for city in SHANDONG_CITIES:
         if city in loc: return f'{city}市'
@@ -40,21 +48,22 @@ def get_monday(d):
     return d - timedelta(days=d.weekday())
 
 def split_items(s):
+    s = clean_text(s)
     if not s: return []
     if any(kw in s for kw in COMMA_WHITELIST): return [s.strip()]
-    return [x.strip() for x in s.replace('，', ',').split(',') if x.strip()]
+    return [clean_text(x) for x in s.replace('，', ',').split(',') if clean_text(x)]
 
 def extract_micro_cats(raw_type):
     results = []
     for part in split_items(raw_type):
-        nodes = [n.strip() for n in part.split('->') if n.strip()]
+        nodes = [clean_text(n) for n in part.split('->') if clean_text(n)]
         if nodes: results.append(nodes[-1])
     return results
 
 def extract_second_nodes(raw_type):
     results = set()
     for part in split_items(raw_type):
-        nodes = [n.strip() for n in part.split('->') if n.strip()]
+        nodes = [clean_text(n) for n in part.split('->') if clean_text(n)]
         results.add(nodes[1] if len(nodes) >= 2 else (nodes[0] if nodes else ''))
     return list(results - {''})
 
@@ -102,6 +111,7 @@ def build_report_data(df, progress_cb=None):
     sub_cat_map = defaultdict(int)
     loc_map     = defaultdict(int)
     weekly_map  = defaultdict(int)
+    weekly_bounds = {}
 
     channel_stats = defaultdict(lambda: {
         'total': 0, 'voice': 0, 'human': 0,
@@ -136,11 +146,11 @@ def build_report_data(df, progress_cb=None):
         except:
             continue
 
-        raw_type = str(row.get('业务类型', '')).strip()
-        cat      = str(row.get('业务类别', '')).strip()
-        lv3      = str(row.get('举报小类', '')).strip().replace(',', '、').replace('，', '、')
-        loc      = parse_location(str(row.get('问题发生地', '')))
-        ch       = str(row.get('数据来源渠道', ''))
+        raw_type = clean_text(row.get('业务类型', ''))
+        cat      = clean_text(row.get('业务类别', ''))
+        lv3      = clean_text(row.get('举报小类', '')).replace(',', '、').replace('，', '、')
+        loc      = parse_location(row.get('问题发生地', ''))
+        ch       = clean_text(row.get('数据来源渠道', ''))
 
         if raw_type in ('服务言行', '服务质效', '侵害权益', '表扬'):
             cat      = '服务投诉'
@@ -159,6 +169,13 @@ def build_report_data(df, progress_cb=None):
 
         if min_date is None or d < min_date: min_date = d
         if max_date is None or d > max_date: max_date = d
+        if week_key not in weekly_bounds:
+            weekly_bounds[week_key] = {'start': d.date(), 'end': d.date()}
+        else:
+            if d.date() < weekly_bounds[week_key]['start']:
+                weekly_bounds[week_key]['start'] = d.date()
+            if d.date() > weekly_bounds[week_key]['end']:
+                weekly_bounds[week_key]['end'] = d.date()
 
         for c in cats: cat_map[c] += 1
         for mc in micro_cats: sub_cat_map[mc] += 1
@@ -166,7 +183,7 @@ def build_report_data(df, progress_cb=None):
         weekly_map[week_key] += 1
 
         for part in split_items(raw_type):
-            nodes = [n.strip() for n in part.split('->') if n.strip()]
+            nodes = [clean_text(n) for n in part.split('->') if clean_text(n)]
             if not nodes: continue
             topic_name = ''
             if nodes[0] == '问题解答' and len(nodes) >= 2:
@@ -190,7 +207,7 @@ def build_report_data(df, progress_cb=None):
         if loc not in ('未知', '外省', '山东省内(未指明市)'):
             city_stats[loc]['total'] += 1
             for part in split_items(raw_type):
-                nodes = [n.strip() for n in part.split('->') if n.strip()]
+                nodes = [clean_text(n) for n in part.split('->') if clean_text(n)]
                 if nodes:
                     issue = nodes[1] if len(nodes) >= 2 else nodes[0]
                     if issue not in ('未知细分', ''):
@@ -199,7 +216,7 @@ def build_report_data(df, progress_cb=None):
         if ch:
             channel_stats[ch]['total'] += 1
             for part in split_items(raw_type):
-                nodes = [n.strip() for n in part.split('->') if n.strip()]
+                nodes = [clean_text(n) for n in part.split('->') if clean_text(n)]
                 if not nodes: continue
                 topic_name = ''
                 if nodes[0] == '问题解答' and len(nodes) >= 2:
@@ -262,6 +279,8 @@ def build_report_data(df, progress_cb=None):
     all_weeks = sorted(weekly_map.keys())
     curr_wk = all_weeks[-1] if all_weeks else None
     prev_wk = all_weeks[-2] if len(all_weeks) >= 2 else None
+    current_week_start = weekly_bounds[curr_wk]['start'].isoformat() if curr_wk and curr_wk in weekly_bounds else None
+    current_week_end = weekly_bounds[curr_wk]['end'].isoformat() if curr_wk and curr_wk in weekly_bounds else None
     consult_anomalies = []
     if curr_wk and prev_wk:
         curr_s, prev_s = weekly_type_stats[curr_wk], weekly_type_stats[prev_wk]
@@ -317,9 +336,10 @@ def build_report_data(df, progress_cb=None):
         tree = {}
         for row in rows:
             raw_type = row.get('type', '')
-            if not raw_type or raw_type == '未知细分': continue
+            if not split_items(raw_type): continue
             for path in split_items(raw_type):
-                nodes = [n.strip() for n in path.split('->') if n.strip()]
+                nodes = [clean_text(n) for n in path.split('->') if clean_text(n)]
+                if not nodes: continue
                 current = tree
                 for node in nodes:
                     if node not in current:
@@ -362,6 +382,8 @@ def build_report_data(df, progress_cb=None):
             'consultTotal': consult_total,
             'dateMin': min_date.strftime('%Y-%m-%d') if min_date else None,
             'dateMax': max_date.strftime('%Y-%m-%d') if max_date else None,
+            'currentWeekStart': current_week_start,
+            'currentWeekEnd': current_week_end,
             'generatedAt': datetime.now().isoformat(),
         },
         'channelSummary': channel_summary,
