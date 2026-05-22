@@ -70,6 +70,11 @@ def extract_second_nodes(raw_type):
 def is_complaint(cat, raw_type):
     return '服务投诉' in cat or '服务投诉' in raw_type
 
+def read_excel_compat(file_path, **kwargs):
+    ext = os.path.splitext(file_path)[-1].lower()
+    engine = 'openpyxl' if ext in ('.xlsx', '.xlsm') else 'xlrd'
+    return pd.read_excel(file_path, engine=engine, **kwargs)
+
 # ==========================================
 # 2. 数据加载模块
 # ==========================================
@@ -79,11 +84,11 @@ def load_detail_file(file_path, channel_name):
         return pd.DataFrame()
     try:
         ext = os.path.splitext(file_path)[-1].lower()
-        df = read_csv_safe(file_path) if ext == '.csv' else pd.read_excel(file_path)
+        df = read_csv_safe(file_path) if ext == '.csv' else read_excel_compat(file_path)
 
         common_headers = ['登记日期', '受理时间', '日期', '业务类型', '业务类别']
         if not any(header in df.columns for header in common_headers):
-            df = read_csv_safe(file_path, header=1) if ext == '.csv' else pd.read_excel(file_path, header=1)
+            df = read_csv_safe(file_path, header=1) if ext == '.csv' else read_excel_compat(file_path, header=1)
 
         df = df.fillna('')
 
@@ -419,18 +424,23 @@ def parse_hall_stats(hall_file_path):
         return [], []
 
     try:
-        df = pd.read_excel(hall_file_path, engine='openpyxl')
+        df = read_excel_compat(hall_file_path)
+        if df.empty or len(df.columns) < 6:
+            print("⚠️ 警告: 大厅汇总表列数不足，无法解析。")
+            return [], []
+
         col_city = df.columns[0]
         col_unit = df.columns[1]
 
-        df[col_city] = df[col_city].ffill().astype(str).str.strip()
-        df[col_unit] = df[col_unit].astype(str).str.strip()
+        df[col_city] = df[col_city].apply(clean_text).replace('', pd.NA).ffill().fillna('')
+        df[col_unit] = df[col_unit].apply(clean_text)
 
         table_hall = []
         idx = 1
 
         for city_name, group in df.groupby(col_city, sort=False):
-            if city_name in ('nan', '0', '', '全省', '全省合计', 'None'):
+            city_name = clean_text(city_name)
+            if city_name in ('0', '全省', '全省合计') or '合计' in city_name:
                 continue
             if not city_name.endswith('市'):
                 city_name += '市'
@@ -440,13 +450,13 @@ def parse_hall_stats(hall_file_path):
             push_sum = push_cnt = 0
 
             for _, row in group.iterrows():
-                unit = str(row[col_unit])
-                if unit in ('nan', '0', '') or '汇总' in unit or '合计' in unit or unit == city_name:
+                unit = clean_text(row[col_unit])
+                if unit in ('0', '') or '汇总' in unit or '合计' in unit or unit == city_name:
                     continue
 
-                try: v = int(row.iloc[2])
+                try: v = int(float(clean_text(row.iloc[2]) or 0))
                 except: v = 0
-                try: h = int(row.iloc[3])
+                try: h = int(float(clean_text(row.iloc[3]) or 0))
                 except: h = 0
 
                 v_total += v
@@ -456,7 +466,7 @@ def parse_hall_stats(hall_file_path):
                 if isinstance(r_val, float) and r_val <= 1.0:
                     r_str = f"{r_val * 100:.2f}%"
                 else:
-                    r_str = str(r_val).strip()
+                    r_str = clean_text(r_val)
                     if not r_str.endswith('%') and r_str != '0': r_str += '%'
 
                 push_val = row.iloc[5]
@@ -464,25 +474,21 @@ def parse_hall_stats(hall_file_path):
                     push_float = push_val * 100
                     push_str   = f"{push_float:.2f}%"
                 else:
-                    push_str_raw = str(push_val).strip().rstrip('%')
+                    push_str_raw = clean_text(push_val).rstrip('%')
                     try:
                         push_float = float(push_str_raw)
                         push_str   = f"{push_float:.2f}%"
                     except:
                         push_float = 0
-                        push_str   = str(push_val)
+                        push_str   = clean_text(push_val) or '0'
                 push_sum += push_float
                 push_cnt += 1
-
-                norm_str = str(row.iloc[6]).strip() if len(row) > 6 else '0'
-                if norm_str in ('0.0', 'nan', 'None'): norm_str = '0'
 
                 districts.append({
                     'name': unit,
                     'voice': v, 'human': h,
                     'rate': r_str,
                     'push': push_str,
-                    'norm': norm_str,
                 })
 
             if districts:
@@ -496,18 +502,17 @@ def parse_hall_stats(hall_file_path):
                     'human': h_total,
                     'rate': city_rate_str,
                     'push': city_push_str,
-                    'norm': '0',
                     'expanded': False,
                     'districts': districts,
                 })
                 idx += 1
-                print(f" ✔️ 成功提取: {city_name} (包含 {len(districts)} 个区县)")
+                print(f"成功提取: {city_name} (包含 {len(districts)} 个区县)")
 
         print(f"====== 大厅汇总表解析完成！======\n")
         return [], table_hall
 
     except Exception as e:
-        print(f"❌ 解析大厅汇总表失败: {e}")
+        print(f"解析大厅汇总表失败: {e}")
         traceback.print_exc()
         return [], []
 
