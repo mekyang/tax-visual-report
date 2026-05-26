@@ -13,9 +13,10 @@ import sys
 # 1. 核心业务规则配置 & 工具函数
 # ==========================================
 SHANDONG_CITIES = [
-    '济南', '青岛', '淄博', '枣庄', '东营', '烟台', '潍坊',
+    '济南', '淄博', '枣庄', '东营', '烟台', '潍坊',
     '济宁', '泰安', '威海', '日照', '临沂', '德州', '聊城', '滨州', '菏泽'
 ]
+EXCLUDED_CITIES = {'青岛', '青岛市'}
 SPECIAL_TOPICS  = ['数电票', '减税降费', '社保费']
 COMMA_WHITELIST = ['【减税降费】', '享受"六税两费"', '器具、设备']
 INVALID_TEXT_VALUES = {'', 'nan', 'none', 'null', 'na', 'n/a', '未知细分'}
@@ -39,6 +40,7 @@ def read_csv_safe(file_path, header=0):
 def parse_location(loc):
     loc = clean_text(loc)
     if not loc or loc == '未知': return '未知'
+    if any(city in loc for city in EXCLUDED_CITIES): return '排除城市'
     for city in SHANDONG_CITIES:
         if city in loc: return f'{city}市'
     if '山东' in loc: return '山东省内(未指明市)'
@@ -156,6 +158,8 @@ def build_report_data(df, progress_cb=None):
         lv3      = clean_text(row.get('举报小类', '')).replace(',', '、').replace('，', '、')
         loc      = parse_location(row.get('问题发生地', ''))
         ch       = clean_text(row.get('数据来源渠道', ''))
+        if loc == '排除城市':
+            continue
 
         if raw_type in ('服务言行', '服务质效', '侵害权益', '表扬'):
             cat      = '服务投诉'
@@ -381,9 +385,12 @@ def build_report_data(df, progress_cb=None):
         key=lambda x: -x['value']
     )
 
+    effective_total = sum(weekly_map.values())
+    denominator = effective_total or 1
+
     return {
         'meta': {
-            'totalRecords': total,
+            'totalRecords': effective_total,
             'consultTotal': consult_total,
             'dateMin': min_date.strftime('%Y-%m-%d') if min_date else None,
             'dateMax': max_date.strftime('%Y-%m-%d') if max_date else None,
@@ -401,11 +408,11 @@ def build_report_data(df, progress_cb=None):
             key=lambda x: -x['value']
         )[:8],
         'macroDemandStatus': sorted(
-            [{'name': k, 'value': v, 'percent': round(v / total * 100, 2)} for k, v in cat_map.items()],
+            [{'name': k, 'value': v, 'percent': round(v / denominator * 100, 2)} for k, v in cat_map.items()],
             key=lambda x: -x['percent']
         )[:5],
         'topMicroCategories': sorted(
-            [{'name': k, 'value': v, 'percent': round(v / total * 100, 2)} for k, v in sub_cat_map.items()],
+            [{'name': k, 'value': v, 'percent': round(v / denominator * 100, 2)} for k, v in sub_cat_map.items()],
             key=lambda x: -x['percent']
         )[:8],
         'trendData': [{'week': wk, 'count': cnt} for wk, cnt in sorted(weekly_map.items())],
@@ -444,6 +451,8 @@ def parse_hall_stats(hall_file_path):
                 continue
             if not city_name.endswith('市'):
                 city_name += '市'
+            if city_name in EXCLUDED_CITIES:
+                continue
 
             districts     = []
             v_total = h_total = 0
@@ -548,7 +557,8 @@ def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, te
         return False
 
     # 构建主报告数据（传递回调函数，以体现行级处理进度）
-    report_data = build_report_data(df_combined, progress_cb=progress_cb)
+    report_data = build_report_data(df_12366, progress_cb=progress_cb)
+    call_volume_data = build_report_data(df_combined)
 
     if progress_cb: progress_cb(75, "正在解析大厅接听汇总表...")
     table_etax, table_hall = parse_hall_stats(hall_stats_path)
@@ -558,6 +568,14 @@ def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, te
     report_data['channelSummary'] = compute_answer_rates(
         table_hall, report_data['channelSummary']
     )
+    report_data['callVolume'] = {
+        'meta': call_volume_data.get('meta', {}),
+        'channelSummary': compute_answer_rates(
+            table_hall, call_volume_data.get('channelSummary', [])
+        ),
+        'locationList': call_volume_data.get('locationList', []),
+        'trendData': call_volume_data.get('trendData', []),
+    }
 
     if progress_cb: progress_cb(85, "数据处理完毕，正在嵌入 HTML 网页模板...")
     try:

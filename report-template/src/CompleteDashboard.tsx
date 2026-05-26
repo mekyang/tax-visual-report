@@ -135,31 +135,35 @@ export default function CompleteDashboard() {
   );
 
   const { meta, channelSummary, globalTopicSummary, locationList, tableHall } = reportData;
+  const callVolume = reportData.callVolume ?? {};
+  const callVolumeMeta = callVolume.meta ?? meta;
+  const callVolumeChannelSummary = callVolume.channelSummary ?? channelSummary;
+  const callVolumeLocationList = callVolume.locationList ?? locationList;
   const displayDateStart = meta.currentWeekStart ?? getFallbackWeekStart(meta.dateMax) ?? meta.dateMin;
   const displayDateEnd = meta.currentWeekEnd ?? meta.dateMax;
 
   // ── 渠道状态卡片数据：直接从后端 channelSummary 读取，不再硬编码 ──
   const hotlineStatus = useMemo(() =>
-    channelSummary.map((ch: any) => ({
+    callVolumeChannelSummary.map((ch: any) => ({
       name: ch.name,
       value: ch.total,
-      percent: meta.totalRecords > 0 ? ((ch.total / meta.totalRecords) * 100).toFixed(1) : '0.0',
+      percent: callVolumeMeta.totalRecords > 0 ? ((ch.total / callVolumeMeta.totalRecords) * 100).toFixed(1) : '0.0',
       // answerRate 由后端计算（来自汇总表真实数据），null 表示不适用
       answerRate: ch.answerRate != null ? ch.answerRate : null,
     })),
-  [channelSummary, meta]);
+  [callVolumeChannelSummary, callVolumeMeta]);
 
   // ── 同比对比数据：后端若有真实同期则用，否则不展示伪造数据 ──
   // 后端字段：channelSummary[].prevTotal（若存在则用，否则 null）
   const channelComparisonData = useMemo(() =>
-    channelSummary
+    callVolumeChannelSummary
       .filter((ch: any) => ch.prevTotal != null)  // 没有历史数据时不展示
       .map((ch: any) => ({
         name: ch.name,
         当期: ch.total,
         同期: ch.prevTotal,
       })),
-  [channelSummary]);
+  [callVolumeChannelSummary]);
 
   // ── 当前 tab 对应的渠道话题数据：O(1) 查找，不遍历明细 ──
   const activeChannelData = useMemo(() => {
@@ -923,7 +927,7 @@ export default function CompleteDashboard() {
               <div className="w-full h-full pt-4 pb-2 pr-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={channelSummary.map((c: any) => ({ name: c.name, 业务量: c.total }))}
+                    data={callVolumeChannelSummary.map((c: any) => ({ name: c.name, 业务量: c.total }))}
                     margin={{ top: 10, right: 0, left: 0, bottom: 0 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -942,10 +946,7 @@ export default function CompleteDashboard() {
             {hotlineStatus.map((item: any, idx: number) => (
               <div
                 key={idx}
-                onClick={() => setActiveChannelTab(item.name)}
-                className={`bg-white border rounded-2xl p-5 flex flex-col relative overflow-hidden shadow-sm hover:shadow-md transition-all cursor-pointer flex-1 ${
-                  activeChannelTab === item.name ? 'border-sky-500 ring-2 ring-sky-200' : 'border-slate-200'
-                }`}
+                className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col relative overflow-hidden shadow-sm hover:shadow-md transition-all flex-1"
               >
                 <div className="absolute top-0 left-0 w-1.5 h-full" style={{ backgroundColor: COLORS[idx] }} />
                 <div className="flex items-center justify-between mb-2 ml-2">
@@ -953,9 +954,6 @@ export default function CompleteDashboard() {
                     <span className="text-slate-800 text-2xl font-black tracking-tight">{item.name}</span>
                     <span className="text-slate-500 text-sm font-medium">接听量</span>
                   </div>
-                  {activeChannelTab === item.name && (
-                    <span className="text-xs text-sky-600 font-bold bg-sky-50 px-2 py-0.5 rounded-full border border-sky-100">已选中</span>
-                  )}
                 </div>
                 <div className="flex items-baseline gap-2 ml-2 mt-1">
                   <span className="text-4xl font-black text-sky-600">{item.value.toLocaleString()}</span>
@@ -973,11 +971,11 @@ export default function CompleteDashboard() {
         </div>
 
         {/* 地市分布柱状图 */}
-        {locationList && locationList.length > 0 && (
+        {callVolumeLocationList && callVolumeLocationList.length > 0 && (
           <GlassCard title="各地市来电总量分布 (基于明细数据统计)" icon={MapPin} className="mb-6">
             <div className="h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={locationList} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+                <BarChart data={callVolumeLocationList} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                   <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} interval={0} />
                   <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
@@ -987,7 +985,7 @@ export default function CompleteDashboard() {
                     formatter={(value: any) => [`${value?.toLocaleString()} 件`, '咨询明细总量']}
                   />
                   <Bar dataKey="value" fill="#0ea5e9" radius={[6, 6, 0, 0]} maxBarSize={40}>
-                    {locationList.map((_: any, i: number) => (
+                    {callVolumeLocationList.map((_: any, i: number) => (
                       <Cell key={i} fill={i < 3 ? '#FF6B6B' : '#4ECDC4'} />
                     ))}
                   </Bar>
