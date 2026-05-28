@@ -54,6 +54,31 @@ const formatRate = (rate: string | number | null | undefined): string => {
   return `${num.toFixed(2)}%`;
 };
 
+const normalizeReportPathNodes = (nodes: string[]): string[] => {
+  const cleanNodes = nodes.map(n => String(n ?? '').trim()).filter(n => !isInvalidCategoryName(n));
+  if (cleanNodes.length === 0) return [];
+
+  let normalized = [...cleanNodes];
+  const first = normalized[0];
+
+  if (first === '服务' || first === '服务投诉') {
+    normalized[0] = '服务投诉';
+  } else if (first === '投诉、举报工单反馈' || first.includes('举报工单反馈') || first === '涉税举报') {
+    normalized[0] = '涉税举报';
+  } else if (first === '问题咨询') {
+    normalized[0] = '问题解答';
+  } else if (first !== '问题解答') {
+    normalized = ['问题解答', ...normalized];
+  }
+
+  return normalized.map((node, idx) => {
+    if (idx > 0 && (node.includes('自然人税收管理系统') || node.includes('ITS'))) {
+      return '电子申报系统';
+    }
+    return node;
+  });
+};
+
 // ==========================================
 // 3. UI 基础组件
 // ==========================================
@@ -68,7 +93,7 @@ const GlassCard = ({ children, className = '', title, icon: Icon, action }: any)
         {action}
       </div>
     )}
-    <div className="p-5 flex-1 flex flex-col relative">{children}</div>
+    <div className="p-5 flex-1 flex flex-col relative min-h-0">{children}</div>
   </div>
 );
 
@@ -222,7 +247,7 @@ export default function CompleteDashboard() {
         // 复用后端同款 split 逻辑（简化版，COMMA_WHITELIST 场景极少）
         const paths = rawType.replace(/，/g, ',').split(',').map((s: string) => s.trim()).filter(Boolean);
         paths.forEach((path: string) => {
-          const nodes = path.split('->').map((n: string) => n.trim()).filter(n => !isInvalidCategoryName(n));
+          const nodes = normalizeReportPathNodes(path.split('->'));
           if (nodes.length === 0) return;
           let cur = tree;
           nodes.forEach((node: string) => {
@@ -249,12 +274,8 @@ export default function CompleteDashboard() {
       else return [];
     }
 
-    // 过滤掉不需要的分类（涉税投诉、举报工单反馈、其他、征管、信息化建设、政策、诉求）
-    // 注意：保留服务投诉，只过滤涉税投诉大类
-    const excludedCats = ['其他', '征管', '信息化建设', '政策', '诉求'];
-    
     return Object.entries(current)
-      .filter(([name]: any) => !isInvalidCategoryName(name) && !excludedCats.some(excluded => name.includes(excluded)))
+      .filter(([name]: any) => !isInvalidCategoryName(name))
       .map(([name, node]: any) => ({ name, value: node.value, hasChildren: node.hasChildren }))
       .sort((a: any, b: any) => b.value - a.value);
   }, [selectedDistrict, drillPath, reportData.globalTypeTree, reportData.interactiveRows]);
@@ -588,8 +609,8 @@ export default function CompleteDashboard() {
 
         <div className="grid grid-cols-12 gap-6 mb-8">
           {/* 地市排行 */}
-          <GlassCard title="各地市业务量分布 (点击可查看单一地市)" icon={MapPin} className="col-span-4 h-[500px]">
-            <div className="flex flex-col gap-2 overflow-y-auto pr-2 h-full">
+          <GlassCard title="各地市业务量分布 (点击可查看单一地市)" icon={MapPin} className="col-span-4 h-[500px] min-h-0">
+            <div className="flex flex-col gap-2 overflow-y-auto pr-2 h-full min-h-0 overscroll-contain">
               {locationData.map((district: any, idx: number) => {
                 const isActive = selectedDistrict === district.id;
                 return (
@@ -665,7 +686,11 @@ export default function CompleteDashboard() {
                         );
                       }}
                     />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} cursor={{ fill: '#f8fafc' }} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                      cursor={{ fill: '#f8fafc' }}
+                      formatter={(value: any) => [`${value?.toLocaleString()} 件`, '数量']}
+                    />
                     <Bar
                       dataKey="value" radius={[0, 4, 4, 0]} barSize={32}
                       onClick={(data: any) => data.hasChildren && data.name && setDrillPath([...drillPath, data.name])}

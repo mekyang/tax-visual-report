@@ -69,6 +69,53 @@ def extract_second_nodes(raw_type):
         results.add(nodes[1] if len(nodes) >= 2 else (nodes[0] if nodes else ''))
     return list(results - {''})
 
+def normalize_report_node(node, idx=0):
+    node = clean_text(node)
+    if idx > 0 and ('自然人税收管理系统' in node or 'ITS' in node.upper()):
+        return '电子申报系统'
+    return node
+
+def normalize_type_path(raw_type, cat='', lv3=''):
+    raw_type = clean_text(raw_type)
+    cat = clean_text(cat)
+    lv3 = clean_text(lv3).replace(',', '、').replace('，', '、')
+
+    if raw_type in ('服务言行', '服务质效', '侵害权益', '表扬'):
+        raw_type = f'服务投诉->{raw_type}{"->"+lv3 if lv3 else ""}'
+    elif raw_type in ('轻微纳税人税收违法行为举报', '纳税人一般税收违法行为举报', '一般涉税违法举报', '税务机关和税务人员税收违法行政行为举报'):
+        raw_type = f'涉税举报->{raw_type}{"->"+lv3 if lv3 else ""}'
+    elif raw_type == '减免政策如何规定？【减税降费】':
+        raw_type = '问题解答->减税降费->减免政策如何规定？【减税降费】'
+
+    normalized_paths = []
+    for part in split_items(raw_type):
+        nodes = [clean_text(n) for n in part.split('->') if clean_text(n)]
+        if not nodes:
+            continue
+
+        first = nodes[0]
+        if first in ('服务', '服务投诉') or cat == '服务':
+            nodes[0] = '服务投诉'
+        elif first == '投诉、举报工单反馈' or '举报工单反馈' in first or first == '涉税举报':
+            nodes[0] = '涉税举报'
+        elif first == '问题咨询':
+            nodes[0] = '问题解答'
+        elif first != '问题解答':
+            nodes = ['问题解答'] + nodes
+
+        nodes = [normalize_report_node(n, idx) for idx, n in enumerate(nodes)]
+        normalized_paths.append('->'.join(nodes))
+
+    if not normalized_paths:
+        return '', ''
+
+    roots = []
+    for path in normalized_paths:
+        root = path.split('->', 1)[0]
+        if root not in roots:
+            roots.append(root)
+    return ','.join(normalized_paths), ','.join(roots)
+
 def is_complaint(cat, raw_type):
     return '服务投诉' in cat or '服务投诉' in raw_type
 
@@ -161,15 +208,10 @@ def build_report_data(df, progress_cb=None):
         if loc == '排除城市':
             continue
 
-        if raw_type in ('服务言行', '服务质效', '侵害权益', '表扬'):
-            cat      = '服务投诉'
-            raw_type = f'服务投诉->{raw_type}{"->"+lv3 if lv3 else ""}'
-        elif raw_type in ('轻微纳税人税收违法行为举报', '纳税人一般税收违法行为举报', '一般涉税违法举报', '税务机关和税务人员税收违法行政行为举报'):
-            cat      = '涉税举报'
-            raw_type = f'涉税举报->{raw_type}{"->"+lv3 if lv3 else ""}'
-        elif raw_type == '减免政策如何规定？【减税降费】':
-            cat      = '问题咨询'
-            raw_type = '问题咨询->减税降费->减免政策如何规定？【减税降费】'
+        raw_type, normalized_cat = normalize_type_path(raw_type, cat, lv3)
+        if not raw_type:
+            continue
+        cat = normalized_cat
 
         cats         = split_items(cat) or ['未知大类']
         micro_cats   = extract_micro_cats(raw_type)
@@ -471,25 +513,8 @@ def parse_hall_stats(hall_file_path):
                 v_total += v
                 h_total += h
 
-                r_val = row.iloc[4]
-                if isinstance(r_val, float) and r_val <= 1.0:
-                    r_str = f"{r_val * 100:.2f}%"
-                else:
-                    r_str = clean_text(r_val)
-                    if not r_str.endswith('%') and r_str != '0': r_str += '%'
-
-                push_val = row.iloc[5]
-                if isinstance(push_val, float) and push_val <= 1.0:
-                    push_float = push_val * 100
-                    push_str   = f"{push_float:.2f}%"
-                else:
-                    push_str_raw = clean_text(push_val).rstrip('%')
-                    try:
-                        push_float = float(push_str_raw)
-                        push_str   = f"{push_float:.2f}%"
-                    except:
-                        push_float = 0
-                        push_str   = clean_text(push_val) or '0'
+                r_str, _ = format_percent_cell(row.iloc[4])
+                push_str, push_float = format_percent_cell(row.iloc[5])
                 push_sum += push_float
                 push_cnt += 1
 
@@ -536,6 +561,25 @@ def compute_answer_rates(table_hall, channel_summary):
         else:
             ch['answerRate'] = None
     return channel_summary
+
+def format_percent_cell(value):
+    if value is None or pd.isna(value):
+        return '0.00%', 0.0
+    if isinstance(value, (int, float)):
+        pct = float(value) * 100 if float(value) <= 1 else float(value)
+        return f"{pct:.2f}%", pct
+
+    text = clean_text(value)
+    if not text:
+        return '0.00%', 0.0
+    raw = text.rstrip('%')
+    try:
+        num = float(raw)
+        if not text.endswith('%') and num <= 1:
+            num *= 100
+        return f"{num:.2f}%", num
+    except:
+        return text, 0.0
 
 # ==========================================
 # 5. 生成报告核心逻辑
