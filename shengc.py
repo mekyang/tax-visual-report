@@ -159,6 +159,38 @@ def load_detail_file(file_path, channel_name):
 # ==========================================
 # 3. 核心报告数据构建
 # ==========================================
+def find_unified_date_column(df):
+    if df is None or df.empty:
+        return None
+    for col in ('统一日期', '缁熶竴鏃ユ湡'):
+        if col in df.columns:
+            return col
+    date_tokens = ('日期', '时间', '鏃ユ湡', '鏃堕棿')
+    for col in df.columns:
+        if any(token in str(col) for token in date_tokens):
+            return col
+    return None
+
+def get_latest_week_start(df):
+    date_col = find_unified_date_column(df)
+    if not date_col:
+        return None
+    dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
+    if dates.empty:
+        return None
+    return get_monday(dates.max().date())
+
+def filter_to_week(df, week_start):
+    if df is None or df.empty or week_start is None:
+        return df
+    date_col = find_unified_date_column(df)
+    if not date_col:
+        return df
+    dates = pd.to_datetime(df[date_col], errors='coerce')
+    week_end = week_start + timedelta(days=6)
+    mask = (dates.dt.date >= week_start) & (dates.dt.date <= week_end)
+    return df.loc[mask].copy()
+
 def build_report_data(df, progress_cb=None):
     total = len(df)
     cat_map     = defaultdict(int)
@@ -601,8 +633,17 @@ def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, te
         return False
 
     # 构建主报告数据（传递回调函数，以体现行级处理进度）
-    report_data = build_report_data(df_12366, progress_cb=progress_cb)
-    call_volume_data = build_report_data(df_combined)
+    week_start = get_latest_week_start(df_12366)
+    df_12366_week = filter_to_week(df_12366, week_start)
+    df_combined_week = filter_to_week(df_combined, week_start)
+
+    # Main report sections use only 12366 detail rows for the latest report week.
+    report_data = build_report_data(df_12366_week, progress_cb=progress_cb)
+    report_history_data = build_report_data(df_12366)
+    report_data['consultAnomalies'] = report_history_data.get('consultAnomalies', [])
+    report_data['bestPracticeInsights'] = report_history_data.get('bestPracticeInsights', [])
+    # Call-volume section may use hall detail rows, but it must stay on the same week.
+    call_volume_data = build_report_data(df_combined_week)
 
     if progress_cb: progress_cb(75, "正在解析大厅接听汇总表...")
     table_etax, table_hall = parse_hall_stats(hall_stats_path)
@@ -732,7 +773,7 @@ class ReportApp:
         header_frame = ttk.Frame(self.root)
         header_frame.pack(fill="x", pady=(0, 15))
         
-        title_lbl = tk.Label(header_frame, text="12366热线可视化工具", font=("Microsoft YaHei", 16, "bold"), bg="#F3F3F3", fg="#333333")
+        title_lbl = tk.Label(header_frame, text="山东税务12366热线诉求分析周报", font=("Microsoft YaHei", 16, "bold"), bg="#F3F3F3", fg="#333333")
         title_lbl.pack(anchor="w")
         
         desc_lbl = tk.Label(header_frame, text="配置基础明细与汇总表，一键渲染报告。", font=("Microsoft YaHei", 9), bg="#F3F3F3", fg="#666666")
