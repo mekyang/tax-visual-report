@@ -635,15 +635,14 @@ def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, te
     # 构建主报告数据（传递回调函数，以体现行级处理进度）
     week_start = get_latest_week_start(df_12366)
     df_12366_week = filter_to_week(df_12366, week_start)
-    df_combined_week = filter_to_week(df_combined, week_start)
 
     # Main report sections use only 12366 detail rows for the latest report week.
     report_data = build_report_data(df_12366_week, progress_cb=progress_cb)
     report_history_data = build_report_data(df_12366)
     report_data['consultAnomalies'] = report_history_data.get('consultAnomalies', [])
     report_data['bestPracticeInsights'] = report_history_data.get('bestPracticeInsights', [])
-    # Call-volume section may use hall detail rows, but it must stay on the same week.
-    call_volume_data = build_report_data(df_combined_week)
+    # Call-volume section keeps the original combined-detail scope.
+    call_volume_data = build_report_data(df_combined)
 
     if progress_cb: progress_cb(75, "正在解析大厅接听汇总表...")
     table_etax, table_hall = parse_hall_stats(hall_stats_path)
