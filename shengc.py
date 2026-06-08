@@ -723,7 +723,8 @@ def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, te
     report_data['bestPracticeInsights'] = report_history_data.get('bestPracticeInsights', [])
     # Call-volume section keeps the original combined-detail scope and does not
     # require business-category fields, because hall detail rows may not carry them.
-    call_volume_data = build_call_volume_data(df_combined)
+    # It uses the same latest-week window as the main 12366 report.
+    call_volume_data = build_call_volume_data(filter_to_week(df_combined, week_start))
 
     if progress_cb: progress_cb(75, "正在解析大厅接听汇总表...")
     table_etax, table_hall = parse_hall_stats(hall_stats_path)

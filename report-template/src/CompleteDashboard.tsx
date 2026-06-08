@@ -166,6 +166,12 @@ export default function CompleteDashboard() {
   const callVolumeLocationList = callVolume.locationList ?? locationList;
   const displayDateStart = meta.currentWeekStart ?? getFallbackWeekStart(meta.dateMax) ?? meta.dateMin;
   const displayDateEnd = meta.currentWeekEnd ?? meta.dateMax;
+  const primaryHotlineCallTotal = useMemo(() => {
+    const hotline = callVolumeChannelSummary.find((ch: any) =>
+      String(ch.name ?? '').includes('12366')
+    );
+    return hotline?.total ?? meta.totalRecords;
+  }, [callVolumeChannelSummary, meta.totalRecords]);
 
   // ── 渠道状态卡片数据：直接从后端 channelSummary 读取，不再硬编码 ──
   const hotlineStatus = useMemo(() =>
@@ -393,8 +399,8 @@ export default function CompleteDashboard() {
         <SectionHeader title="一、咨询需求情况分析" step="01" />
         <GlassCard icon={Database}>
           <div className="mb-6 text-slate-600 leading-relaxed text-base bg-slate-50 p-5 rounded-xl border border-slate-100 indent-8">
-            {formatDate(displayDateStart)}至{formatDate(displayDateEnd)}，本期监测周期内山东税务税费服务热线累计来电
-            <span className="text-sky-600 font-bold text-xl mx-1">{meta.totalRecords.toLocaleString()}</span>通。咨询需求情况如下：
+            {formatDate(displayDateStart)}至{formatDate(displayDateEnd)}，本期监测周期内山东税务12366热线累计来电
+            <span className="text-sky-600 font-bold text-xl mx-1">{primaryHotlineCallTotal.toLocaleString()}</span>通。咨询需求情况如下：
           </div>
         </GlassCard>
 
