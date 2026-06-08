@@ -191,6 +191,86 @@ def filter_to_week(df, week_start):
     mask = (dates.dt.date >= week_start) & (dates.dt.date <= week_end)
     return df.loc[mask].copy()
 
+def build_call_volume_data(df):
+    channel_stats = defaultdict(int)
+    loc_map = defaultdict(int)
+    weekly_map = defaultdict(int)
+    weekly_bounds = {}
+    min_date = max_date = None
+
+    if df is None or df.empty:
+        return {
+            'meta': {
+                'totalRecords': 0,
+                'dateMin': None,
+                'dateMax': None,
+                'currentWeekStart': None,
+                'currentWeekEnd': None,
+                'generatedAt': datetime.now().isoformat(),
+            },
+            'channelSummary': [],
+            'locationList': [],
+            'trendData': [],
+        }
+
+    date_col = find_unified_date_column(df)
+    if not date_col:
+        return build_call_volume_data(pd.DataFrame())
+
+    for _, row in df.iterrows():
+        d = pd.to_datetime(row.get(date_col, ''), errors='coerce')
+        if pd.isna(d):
+            continue
+
+        ch = clean_text(row.get('数据来源渠道', '')) or '未知渠道'
+        loc = parse_location(row.get('问题发生地', ''))
+        if loc == '排除城市':
+            continue
+
+        if min_date is None or d < min_date:
+            min_date = d
+        if max_date is None or d > max_date:
+            max_date = d
+
+        week_key = get_monday(d.date()).isoformat()
+        if week_key not in weekly_bounds:
+            weekly_bounds[week_key] = {'start': d.date(), 'end': d.date()}
+        else:
+            if d.date() < weekly_bounds[week_key]['start']:
+                weekly_bounds[week_key]['start'] = d.date()
+            if d.date() > weekly_bounds[week_key]['end']:
+                weekly_bounds[week_key]['end'] = d.date()
+
+        channel_stats[ch] += 1
+        weekly_map[week_key] += 1
+        if loc not in ('未知', '外省', '山东省内(未指明市)'):
+            loc_map[loc] += 1
+
+    all_weeks = sorted(weekly_map.keys())
+    curr_wk = all_weeks[-1] if all_weeks else None
+    current_week_start = weekly_bounds[curr_wk]['start'].isoformat() if curr_wk and curr_wk in weekly_bounds else None
+    current_week_end = weekly_bounds[curr_wk]['end'].isoformat() if curr_wk and curr_wk in weekly_bounds else None
+
+    return {
+        'meta': {
+            'totalRecords': sum(channel_stats.values()),
+            'dateMin': min_date.strftime('%Y-%m-%d') if min_date else None,
+            'dateMax': max_date.strftime('%Y-%m-%d') if max_date else None,
+            'currentWeekStart': current_week_start,
+            'currentWeekEnd': current_week_end,
+            'generatedAt': datetime.now().isoformat(),
+        },
+        'channelSummary': [
+            {'name': name, 'total': total, 'topicSummary': [], 'top3': []}
+            for name, total in sorted(channel_stats.items(), key=lambda x: -x[1])
+        ],
+        'locationList': sorted(
+            [{'name': k, 'value': v} for k, v in loc_map.items()],
+            key=lambda x: -x['value']
+        ),
+        'trendData': [{'week': wk, 'count': cnt} for wk, cnt in sorted(weekly_map.items())],
+    }
+
 def build_report_data(df, progress_cb=None):
     total = len(df)
     cat_map     = defaultdict(int)
@@ -641,8 +721,9 @@ def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, te
     report_history_data = build_report_data(df_12366)
     report_data['consultAnomalies'] = report_history_data.get('consultAnomalies', [])
     report_data['bestPracticeInsights'] = report_history_data.get('bestPracticeInsights', [])
-    # Call-volume section keeps the original combined-detail scope.
-    call_volume_data = build_report_data(df_combined)
+    # Call-volume section keeps the original combined-detail scope and does not
+    # require business-category fields, because hall detail rows may not carry them.
+    call_volume_data = build_call_volume_data(df_combined)
 
     if progress_cb: progress_cb(75, "正在解析大厅接听汇总表...")
     table_etax, table_hall = parse_hall_stats(hall_stats_path)
