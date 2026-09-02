@@ -11,9 +11,19 @@ __pycache__/
 
 # Build artifacts
 artifacts/
+build/
+dist/
+dist-gh/
+*.spec
 
 # Backups
 index_backup_*.html
+
+# Local sample/data files
+dating/
+*.xls
+*.xlsx
+*.csv
 
 # OS
 .DS_Store
