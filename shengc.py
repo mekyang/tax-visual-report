@@ -4,8 +4,11 @@ import os
 import traceback
 from datetime import datetime, timedelta
 from collections import defaultdict
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, messagebox
+except ImportError:
+    tk = None
 import threading
 import sys
 
@@ -46,11 +49,8 @@ def parse_location(loc):
     if '山东' in loc: return '山东省内(未指明市)'
     return '外省'
 
-def get_month_start(d):
-    return d.replace(day=1)
-
-def get_next_month_start(d):
-    return (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+def get_monday(d):
+    return d - timedelta(days=d.weekday())
 
 def split_items(s):
     s = clean_text(s)
@@ -174,31 +174,110 @@ def find_unified_date_column(df):
             return col
     return None
 
-def get_latest_month_start(df):
+def get_latest_week_start(df):
     date_col = find_unified_date_column(df)
     if not date_col:
         return None
     dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
     if dates.empty:
         return None
-    return get_month_start(dates.max().date())
+    return get_monday(dates.max().date())
 
-def filter_to_month(df, month_start):
-    if df is None or df.empty or month_start is None:
+def filter_to_week(df, week_start):
+    if df is None or df.empty or week_start is None:
         return df
     date_col = find_unified_date_column(df)
     if not date_col:
         return df
     dates = pd.to_datetime(df[date_col], errors='coerce')
-    next_month = get_next_month_start(month_start)
-    mask = (dates.dt.date >= month_start) & (dates.dt.date < next_month)
+    week_end = week_start + timedelta(days=6)
+    mask = (dates.dt.date >= week_start) & (dates.dt.date <= week_end)
     return df.loc[mask].copy()
+
+def parse_period_dates(values):
+    dates = pd.to_datetime(values, errors='coerce')
+    missing = dates.isna()
+    if missing.any():
+        dates.loc[missing] = values.loc[missing].map(lambda value: pd.to_datetime(value, errors='coerce'))
+    return dates
+
+def quarter_start(d):
+    return d.replace(month=((d.month - 1) // 3) * 3 + 1, day=1)
+
+def shift_quarter(start, offset):
+    index = start.year * 12 + start.month - 1 + offset * 3
+    return start.replace(year=index // 12, month=index % 12 + 1, day=1)
+
+def choose_quarter(df, target=None):
+    import re
+    from datetime import date
+    if target:
+        match = re.fullmatch(r'(\d{4})-Q([1-4])', target.strip(), re.IGNORECASE)
+        if not match:
+            raise ValueError('季度请填写 YYYY-Q1 至 YYYY-Q4，例如 2026-Q2')
+        year, part = map(int, match.groups())
+        return date(year, (part - 1) * 3 + 1, 1)
+    col = find_unified_date_column(df)
+    if not col:
+        raise ValueError('12366明细中没有日期列')
+    dates = parse_period_dates(df[col]).dropna()
+    if dates.empty:
+        raise ValueError('12366明细中没有有效日期')
+    return quarter_start(dates.max().date())
+
+def filter_to_quarter(df, start):
+    if df is None or df.empty:
+        return df
+    col = find_unified_date_column(df)
+    if not col:
+        raise ValueError('明细中没有日期列')
+    dates = parse_period_dates(df[col])
+    return df.loc[(dates.dt.date >= start) & (dates.dt.date < shift_quarter(start, 1))].copy()
+
+def build_quarter_data(df_12366, df_hall, target=None, progress_cb=None):
+    start = choose_quarter(df_12366, target)
+    current = filter_to_quarter(df_12366, start)
+    if current.empty:
+        raise ValueError('所选季度没有12366明细')
+    # 沿用6月8日原有分类与统计函数，只更换日期筛选范围。
+    report = build_report_data(current, progress_cb=progress_cb)
+    if not report['meta']['totalRecords']:
+        raise ValueError('所选季度没有有效分类记录')
+    calls = build_call_volume_data(filter_to_quarter(pd.concat([df_12366, df_hall], ignore_index=True), start))
+    label = f'{start.year}年第{(start.month - 1) // 3 + 1}季度'
+    report['meta'].update({
+        'periodType': 'quarter', 'periodLabel': label,
+        'periodStart': report['meta']['dateMin'], 'periodEnd': report['meta']['dateMax'],
+        'quarterStart': start.isoformat(),
+        'quarterEnd': (shift_quarter(start, 1) - timedelta(days=1)).isoformat(),
+    })
+    previous = build_report_data(filter_to_quarter(df_12366, shift_quarter(start, -1)))
+    current_topics = {x['name']: x['total'] for x in report['globalTopicSummary']}
+    previous_topics = {x['name']: x['total'] for x in previous['globalTopicSummary']}
+    # 复用原有异常卡片的字段与阈值，季报比较紧邻上季度。
+    report['consultAnomalies'] = []
+    if previous['meta']['totalRecords']:
+        for name in set(current_topics) | set(previous_topics):
+            curr, prev = current_topics.get(name, 0), previous_topics.get(name, 0)
+            diff = curr - prev
+            ratio = curr / prev if prev else (float('inf') if curr else 1)
+            up, down = ratio > 1.1 and diff > 5, ratio < (1 / 1.1) and diff < -5
+            if up or down:
+                report['consultAnomalies'].append({
+                    'name': name, 'currVol': curr, 'prevVol': prev,
+                    'currRate': str(curr), 'prevRate': str(prev),
+                    'changePoints': f'{diff:+d}',
+                    'changePct': f'{abs(ratio - 1) * 100:.0f}%' if prev else 'N/A',
+                    'trend': 'up' if up else 'down',
+                })
+        report['consultAnomalies'].sort(key=lambda x: abs(int(x['changePoints'])), reverse=True)
+    return report, calls
 
 def build_call_volume_data(df):
     channel_stats = defaultdict(int)
     loc_map = defaultdict(int)
-    monthly_map = defaultdict(int)
-    monthly_bounds = {}
+    weekly_map = defaultdict(int)
+    weekly_bounds = {}
     min_date = max_date = None
 
     if df is None or df.empty:
@@ -207,8 +286,6 @@ def build_call_volume_data(df):
                 'totalRecords': 0,
                 'dateMin': None,
                 'dateMax': None,
-                'currentMonthStart': None,
-                'currentMonthEnd': None,
                 'currentWeekStart': None,
                 'currentWeekEnd': None,
                 'generatedAt': datetime.now().isoformat(),
@@ -237,34 +314,32 @@ def build_call_volume_data(df):
         if max_date is None or d > max_date:
             max_date = d
 
-        month_key = get_month_start(d.date()).isoformat()
-        if month_key not in monthly_bounds:
-            monthly_bounds[month_key] = {'start': d.date(), 'end': d.date()}
+        week_key = get_monday(d.date()).isoformat()
+        if week_key not in weekly_bounds:
+            weekly_bounds[week_key] = {'start': d.date(), 'end': d.date()}
         else:
-            if d.date() < monthly_bounds[month_key]['start']:
-                monthly_bounds[month_key]['start'] = d.date()
-            if d.date() > monthly_bounds[month_key]['end']:
-                monthly_bounds[month_key]['end'] = d.date()
+            if d.date() < weekly_bounds[week_key]['start']:
+                weekly_bounds[week_key]['start'] = d.date()
+            if d.date() > weekly_bounds[week_key]['end']:
+                weekly_bounds[week_key]['end'] = d.date()
 
         channel_stats[ch] += 1
-        monthly_map[month_key] += 1
+        weekly_map[week_key] += 1
         if loc not in ('未知', '外省', '山东省内(未指明市)'):
             loc_map[loc] += 1
 
-    all_months = sorted(monthly_map.keys())
-    curr_month = all_months[-1] if all_months else None
-    current_month_start = monthly_bounds[curr_month]['start'].isoformat() if curr_month and curr_month in monthly_bounds else None
-    current_month_end = monthly_bounds[curr_month]['end'].isoformat() if curr_month and curr_month in monthly_bounds else None
+    all_weeks = sorted(weekly_map.keys())
+    curr_wk = all_weeks[-1] if all_weeks else None
+    current_week_start = weekly_bounds[curr_wk]['start'].isoformat() if curr_wk and curr_wk in weekly_bounds else None
+    current_week_end = weekly_bounds[curr_wk]['end'].isoformat() if curr_wk and curr_wk in weekly_bounds else None
 
     return {
         'meta': {
             'totalRecords': sum(channel_stats.values()),
             'dateMin': min_date.strftime('%Y-%m-%d') if min_date else None,
             'dateMax': max_date.strftime('%Y-%m-%d') if max_date else None,
-            'currentMonthStart': current_month_start,
-            'currentMonthEnd': current_month_end,
-            'currentWeekStart': current_month_start,
-            'currentWeekEnd': current_month_end,
+            'currentWeekStart': current_week_start,
+            'currentWeekEnd': current_week_end,
             'generatedAt': datetime.now().isoformat(),
         },
         'channelSummary': [
@@ -275,7 +350,7 @@ def build_call_volume_data(df):
             [{'name': k, 'value': v} for k, v in loc_map.items()],
             key=lambda x: -x['value']
         ),
-        'trendData': [{'month': month, 'count': cnt} for month, cnt in sorted(monthly_map.items())],
+        'trendData': [{'week': wk, 'count': cnt} for wk, cnt in sorted(weekly_map.items())],
     }
 
 def build_report_data(df, progress_cb=None):
@@ -283,8 +358,8 @@ def build_report_data(df, progress_cb=None):
     cat_map     = defaultdict(int)
     sub_cat_map = defaultdict(int)
     loc_map     = defaultdict(int)
-    monthly_map  = defaultdict(int)
-    monthly_bounds = {}
+    weekly_map  = defaultdict(int)
+    weekly_bounds = {}
 
     channel_stats = defaultdict(lambda: {
         'total': 0, 'voice': 0, 'human': 0,
@@ -293,7 +368,7 @@ def build_report_data(df, progress_cb=None):
     })
 
     city_stats = defaultdict(lambda: {'total': 0, 'types': defaultdict(int)})
-    monthly_type_stats = defaultdict(lambda: {'total': 0, 'types': defaultdict(int)})
+    weekly_type_stats = defaultdict(lambda: {'total': 0, 'types': defaultdict(int)})
     global_topic_tree = defaultdict(lambda: {'total': 0, 'hot': defaultdict(int)})
 
     complaint_sub_map = defaultdict(int)
@@ -335,22 +410,22 @@ def build_report_data(df, progress_cb=None):
         cats         = split_items(cat) or ['未知大类']
         micro_cats   = extract_micro_cats(raw_type)
         second_nodes = extract_second_nodes(raw_type)
-        month_key    = get_month_start(d.date()).isoformat()
+        week_key     = get_monday(d.date()).isoformat()
 
         if min_date is None or d < min_date: min_date = d
         if max_date is None or d > max_date: max_date = d
-        if month_key not in monthly_bounds:
-            monthly_bounds[month_key] = {'start': d.date(), 'end': d.date()}
+        if week_key not in weekly_bounds:
+            weekly_bounds[week_key] = {'start': d.date(), 'end': d.date()}
         else:
-            if d.date() < monthly_bounds[month_key]['start']:
-                monthly_bounds[month_key]['start'] = d.date()
-            if d.date() > monthly_bounds[month_key]['end']:
-                monthly_bounds[month_key]['end'] = d.date()
+            if d.date() < weekly_bounds[week_key]['start']:
+                weekly_bounds[week_key]['start'] = d.date()
+            if d.date() > weekly_bounds[week_key]['end']:
+                weekly_bounds[week_key]['end'] = d.date()
 
         for c in cats: cat_map[c] += 1
         for mc in micro_cats: sub_cat_map[mc] += 1
         loc_map[loc] += 1
-        monthly_map[month_key] += 1
+        weekly_map[week_key] += 1
 
         for part in split_items(raw_type):
             nodes = [clean_text(n) for n in part.split('->') if clean_text(n)]
@@ -369,10 +444,10 @@ def build_report_data(df, progress_cb=None):
         if '问题咨询' in cats or '问题解答' in ''.join([raw_type]):
             consult_total += 1
 
-        mts = monthly_type_stats[month_key]
-        mts['total'] += 1
+        wts = weekly_type_stats[week_key]
+        wts['total'] += 1
         for node in (second_nodes or micro_cats):
-            mts['types'][node] += 1
+            wts['types'][node] += 1
 
         if loc not in ('未知', '外省', '山东省内(未指明市)'):
             city_stats[loc]['total'] += 1
@@ -446,14 +521,14 @@ def build_report_data(df, progress_cb=None):
             'top3': [t['name'] for t in topic_list[:3]],
         })
 
-    all_months = sorted(monthly_map.keys())
-    curr_month = all_months[-1] if all_months else None
-    prev_month = all_months[-2] if len(all_months) >= 2 else None
-    current_month_start = monthly_bounds[curr_month]['start'].isoformat() if curr_month and curr_month in monthly_bounds else None
-    current_month_end = monthly_bounds[curr_month]['end'].isoformat() if curr_month and curr_month in monthly_bounds else None
+    all_weeks = sorted(weekly_map.keys())
+    curr_wk = all_weeks[-1] if all_weeks else None
+    prev_wk = all_weeks[-2] if len(all_weeks) >= 2 else None
+    current_week_start = weekly_bounds[curr_wk]['start'].isoformat() if curr_wk and curr_wk in weekly_bounds else None
+    current_week_end = weekly_bounds[curr_wk]['end'].isoformat() if curr_wk and curr_wk in weekly_bounds else None
     consult_anomalies = []
-    if curr_month and prev_month:
-        curr_s, prev_s = monthly_type_stats[curr_month], monthly_type_stats[prev_month]
+    if curr_wk and prev_wk:
+        curr_s, prev_s = weekly_type_stats[curr_wk], weekly_type_stats[prev_wk]
         if curr_s['total'] > 0 and prev_s['total'] > 0:
             for t_name in set(list(curr_s['types']) + list(prev_s['types'])):
                 c_cnt = curr_s['types'].get(t_name, 0)
@@ -546,7 +621,7 @@ def build_report_data(df, progress_cb=None):
         key=lambda x: -x['value']
     )
 
-    effective_total = sum(monthly_map.values())
+    effective_total = sum(weekly_map.values())
     denominator = effective_total or 1
 
     return {
@@ -555,10 +630,8 @@ def build_report_data(df, progress_cb=None):
             'consultTotal': consult_total,
             'dateMin': min_date.strftime('%Y-%m-%d') if min_date else None,
             'dateMax': max_date.strftime('%Y-%m-%d') if max_date else None,
-            'currentMonthStart': current_month_start,
-            'currentMonthEnd': current_month_end,
-            'currentWeekStart': current_month_start,
-            'currentWeekEnd': current_month_end,
+            'currentWeekStart': current_week_start,
+            'currentWeekEnd': current_week_end,
             'generatedAt': datetime.now().isoformat(),
         },
         'channelSummary': channel_summary,
@@ -578,42 +651,183 @@ def build_report_data(df, progress_cb=None):
             [{'name': k, 'value': v, 'percent': round(v / denominator * 100, 2)} for k, v in sub_cat_map.items()],
             key=lambda x: -x['percent']
         )[:8],
-        'trendData': [{'month': month, 'count': cnt} for month, cnt in sorted(monthly_map.items())],
+        'trendData': [{'week': wk, 'count': cnt} for wk, cnt in sorted(weekly_map.items())],
         'locationList': location_list,
         'globalTypeTree': serialized_tree,
         'interactiveRows': cube_rows,
     }
 
 # ==========================================
-# 4. 生成报告核心逻辑
+# 4. 解析大厅汇总数据
 # ==========================================
-def generate_offline_report(data_12366_path, template_path, output_dir, progress_cb=None):
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始生成月度报表...")
+def parse_hall_stats(hall_file_path):
+    print(f"\n====== 开始解析办税大厅汇总表 ======")
+    if not os.path.exists(hall_file_path):
+        print(f"⚠️ 警告: 找不到文件 {hall_file_path}")
+        return [], []
+
+    try:
+        df = read_excel_compat(hall_file_path)
+        if df.empty or len(df.columns) < 6:
+            print("⚠️ 警告: 大厅汇总表列数不足，无法解析。")
+            return [], []
+
+        col_city = df.columns[0]
+        col_unit = df.columns[1]
+
+        df[col_city] = df[col_city].apply(clean_text).replace('', pd.NA).ffill().fillna('')
+        df[col_unit] = df[col_unit].apply(clean_text)
+
+        table_hall = []
+        idx = 1
+
+        for city_name, group in df.groupby(col_city, sort=False):
+            city_name = clean_text(city_name)
+            if city_name in ('0', '全省', '全省合计') or '合计' in city_name:
+                continue
+            if not city_name.endswith('市'):
+                city_name += '市'
+            if city_name in EXCLUDED_CITIES:
+                continue
+
+            districts     = []
+            v_total = h_total = 0
+            push_sum = push_cnt = 0
+
+            for _, row in group.iterrows():
+                unit = clean_text(row[col_unit])
+                if unit in ('0', '') or '汇总' in unit or '合计' in unit or unit == city_name:
+                    continue
+
+                try: v = int(float(clean_text(row.iloc[2]) or 0))
+                except: v = 0
+                try: h = int(float(clean_text(row.iloc[3]) or 0))
+                except: h = 0
+
+                v_total += v
+                h_total += h
+
+                r_str, _ = format_percent_cell(row.iloc[4])
+                push_str, push_float = format_percent_cell(row.iloc[5])
+                push_sum += push_float
+                push_cnt += 1
+
+                districts.append({
+                    'name': unit,
+                    'voice': v, 'human': h,
+                    'rate': r_str,
+                    'push': push_str,
+                })
+
+            if districts:
+                city_rate_str = f"{(h_total / v_total * 100):.2f}%" if v_total > 0 else "0.00%"
+                city_push_str = f"{(push_sum / push_cnt):.2f}%" if push_cnt > 0 else "0.00%"
+
+                table_hall.append({
+                    'id': str(idx),
+                    'name': city_name,
+                    'voice': v_total,
+                    'human': h_total,
+                    'rate': city_rate_str,
+                    'push': city_push_str,
+                    'expanded': False,
+                    'districts': districts,
+                })
+                idx += 1
+                print(f"成功提取: {city_name} (包含 {len(districts)} 个区县)")
+
+        print(f"====== 大厅汇总表解析完成！======\n")
+        return [], table_hall
+
+    except Exception as e:
+        print(f"解析大厅汇总表失败: {e}")
+        traceback.print_exc()
+        return [], []
+
+def compute_answer_rates(table_hall, channel_summary):
+    total_voice = sum(c.get('voice', 0) for c in table_hall)
+    total_human = sum(c.get('human', 0) for c in table_hall)
+    rate_12366 = round(total_human / total_voice * 100, 1) if total_voice > 0 else None
+
+    for ch in channel_summary:
+        if ch['name'] == '12366热线':
+            ch['answerRate'] = rate_12366
+        else:
+            ch['answerRate'] = None
+    return channel_summary
+
+def format_percent_cell(value):
+    if value is None or pd.isna(value):
+        return '0.00%', 0.0
+    if isinstance(value, (int, float)):
+        pct = float(value) * 100 if float(value) <= 1 else float(value)
+        return f"{pct:.2f}%", pct
+
+    text = clean_text(value)
+    if not text:
+        return '0.00%', 0.0
+    raw = text.rstrip('%')
+    try:
+        num = float(raw)
+        if not text.endswith('%') and num <= 1:
+            num *= 100
+        return f"{num:.2f}%", num
+    except:
+        return text, 0.0
+
+# ==========================================
+# 5. 生成报告核心逻辑
+# ==========================================
+def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, template_path, output_dir,
+                            progress_cb=None, period_type='week', target_quarter=None):
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始生成双渠道报表...")
 
     if progress_cb: progress_cb(5, "正在读取 12366 明细表...")
     df_12366 = load_detail_file(data_12366_path, '12366热线')
 
-    if df_12366.empty:
-        print("❌ 错误：12366 明细数据未成功加载，无法生成报告！")
+    if progress_cb: progress_cb(15, "正在读取 办税服务厅 明细表...")
+    df_hall  = load_detail_file(data_hall_path,  '办税服务厅')
+
+    if progress_cb: progress_cb(25, "正在合并基础数据源...")
+    df_combined = pd.concat([df_12366, df_hall], ignore_index=True)
+
+    if df_combined.empty:
+        print("❌ 错误：12366 和 办税服务厅 的明细数据均未成功加载，无法生成报告！")
         return False
 
-    if progress_cb: progress_cb(25, "正在筛选最新月份数据...")
-    month_start = get_latest_month_start(df_12366)
-    df_12366_month = filter_to_month(df_12366, month_start)
+    if period_type == 'quarter':
+        report_data, call_volume_data = build_quarter_data(df_12366, df_hall, target_quarter, progress_cb)
+    elif period_type == 'week':
+        # 构建主报告数据（传递回调函数，以体现行级处理进度）
+        week_start = get_latest_week_start(df_12366)
+        df_12366_week = filter_to_week(df_12366, week_start)
 
-    # Main report sections use only 12366 detail rows for the latest report month.
-    report_data = build_report_data(df_12366_month, progress_cb=progress_cb)
-    report_history_data = build_report_data(df_12366)
-    report_data['consultAnomalies'] = report_history_data.get('consultAnomalies', [])
-    report_data['bestPracticeInsights'] = report_history_data.get('bestPracticeInsights', [])
-    call_volume_data = build_call_volume_data(df_12366_month)
+        # Main report sections use only 12366 detail rows for the latest report week.
+        report_data = build_report_data(df_12366_week, progress_cb=progress_cb)
+        report_history_data = build_report_data(df_12366)
+        report_data['consultAnomalies'] = report_history_data.get('consultAnomalies', [])
+        report_data['bestPracticeInsights'] = report_history_data.get('bestPracticeInsights', [])
+        # Call-volume section keeps the original combined-detail scope and does not
+        # require business-category fields, because hall detail rows may not carry them.
+        # It uses the same latest-week window as the main 12366 report.
+        call_volume_data = build_call_volume_data(filter_to_week(df_combined, week_start))
 
-    if progress_cb: progress_cb(75, "正在生成来电量指标...")
-    report_data['tableEtax'] = []
-    report_data['tableHall'] = []
+    else:
+        raise ValueError('报告周期只能为 week 或 quarter')
+
+    if progress_cb: progress_cb(75, "正在解析大厅接听汇总表...")
+    table_etax, table_hall = parse_hall_stats(hall_stats_path)
+    report_data['tableEtax'] = table_etax
+    report_data['tableHall'] = table_hall
+
+    report_data['channelSummary'] = compute_answer_rates(
+        table_hall, report_data['channelSummary']
+    )
     report_data['callVolume'] = {
         'meta': call_volume_data.get('meta', {}),
-        'channelSummary': call_volume_data.get('channelSummary', []),
+        'channelSummary': compute_answer_rates(
+            table_hall, call_volume_data.get('channelSummary', [])
+        ),
         'locationList': call_volume_data.get('locationList', []),
         'trendData': call_volume_data.get('trendData', []),
     }
@@ -626,6 +840,8 @@ def generate_offline_report(data_12366_path, template_path, output_dir, progress
         with open(template_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
 
+        if period_type == 'quarter':
+            html_content = html_content.replace('山东税务12366热线诉求分析周报', '山东税务12366热线诉求分析季报')
         if '<title>' in html_content:
             final_html = html_content.replace('<title>', injection + '<title>')
         elif '<head>' in html_content:
@@ -634,7 +850,8 @@ def generate_offline_report(data_12366_path, template_path, output_dir, progress
             final_html = injection + html_content
 
         os.makedirs(output_dir, exist_ok=True)
-        out_path = os.path.join(output_dir, f"分析报告_{datetime.now().strftime('%Y%m%d_%H%M')}.html")
+        name_prefix = report_data['meta']['periodLabel'] + '_分析季报' if period_type == 'quarter' else '分析报告'
+        out_path = os.path.join(output_dir, f"{name_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.html")
 
         if progress_cb: progress_cb(95, "正在输出最终文件...")
         with open(out_path, 'w', encoding='utf-8') as f:
@@ -642,7 +859,7 @@ def generate_offline_report(data_12366_path, template_path, output_dir, progress
 
         print(f"\n✅ 生成完毕！共统计明细记录 {report_data['meta']['totalRecords']} 条。")
         print(f"报告已保存至：\n{out_path}\n")
-        
+
         if progress_cb: progress_cb(100, "生成成功！")
         return True
 
@@ -689,14 +906,18 @@ class RedirectText(object):
 class ReportApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("税务诉求月报生成工具 v1.0")
-        self.root.geometry("720x650")  # 增加了高度以容纳进度条
+        self.root.title("税务诉求分析报告生成工具 v1.0")
+        self.root.geometry("800x750")  # 增加了高度以容纳进度条
         self.root.configure(bg="#F3F3F3", padx=20, pady=20)
-        
+
         self.setup_styles()
         self.base_path = get_app_base_path()
-        
+
+        self.period_type = tk.StringVar(value='周报')
+        self.target_quarter = tk.StringVar()
         self.path_12366 = tk.StringVar()
+        self.path_hall = tk.StringVar()
+        self.path_stats = tk.StringVar()
         self.path_template = tk.StringVar(value=get_default_template_path())
         self.dir_output = tk.StringVar(value=os.path.join(self.base_path, '生成报告'))
 
@@ -705,17 +926,17 @@ class ReportApp:
     def setup_styles(self):
         style = ttk.Style()
         style.theme_use('clam')
-        
+
         default_font = ("Microsoft YaHei", 9)
         title_font = ("Microsoft YaHei", 12, "bold")
-        
+
         style.configure(".", font=default_font, background="#F3F3F3")
         style.configure("Card.TLabelframe", background="#FFFFFF", borderwidth=1, relief="solid")
         style.configure("Card.TLabelframe.Label", font=("Microsoft YaHei", 10, "bold"), background="#F3F3F3", foreground="#005A9E")
-        
+
         style.configure("Inner.TFrame", background="#FFFFFF")
         style.configure("Inner.TLabel", background="#FFFFFF", font=default_font)
-        
+
         style.configure("TButton", font=default_font, padding=4)
         style.configure("Accent.TButton", font=title_font, foreground="#FFFFFF", background="#0078D7", padding=6)
         style.map("Accent.TButton", background=[("active", "#106EBE")])
@@ -726,11 +947,11 @@ class ReportApp:
     def create_widgets(self):
         header_frame = ttk.Frame(self.root)
         header_frame.pack(fill="x", pady=(0, 15))
-        
-        title_lbl = tk.Label(header_frame, text="山东税务12366热线诉求分析月报", font=("Microsoft YaHei", 16, "bold"), bg="#F3F3F3", fg="#333333")
+
+        title_lbl = tk.Label(header_frame, text="山东税务12366热线诉求分析周报", font=("Microsoft YaHei", 16, "bold"), bg="#F3F3F3", fg="#333333")
         title_lbl.pack(anchor="w")
-        
-        desc_lbl = tk.Label(header_frame, text="读取本月与上月12366明细，一键渲染月度报告。", font=("Microsoft YaHei", 9), bg="#F3F3F3", fg="#666666")
+
+        desc_lbl = tk.Label(header_frame, text="配置基础明细与汇总表，一键渲染报告。", font=("Microsoft YaHei", 9), bg="#F3F3F3", fg="#666666")
         desc_lbl.pack(anchor="w", pady=(5, 0))
 
         form_frame = ttk.LabelFrame(self.root, text=" 数据源配置 ", style="Card.TLabelframe", padding=(15, 10))
@@ -739,13 +960,13 @@ class ReportApp:
         def add_row(parent, label_text, var, is_dir=False, filetypes=None):
             row = ttk.Frame(parent, style="Inner.TFrame")
             row.pack(fill="x", pady=8)
-            
+
             lbl = ttk.Label(row, text=label_text, width=22, anchor="e", style="Inner.TLabel")
             lbl.pack(side="left", padx=(0, 10))
-            
+
             entry = ttk.Entry(row, textvariable=var)
             entry.pack(side="left", fill="x", expand=True)
-            
+
             def browse():
                 if is_dir:
                     p = filedialog.askdirectory(initialdir=self.base_path)
@@ -757,21 +978,31 @@ class ReportApp:
             btn = ttk.Button(row, text="浏览...", command=browse, width=8)
             btn.pack(side="right", padx=(10, 0))
 
+        period_row = ttk.Frame(form_frame, style="Inner.TFrame")
+        period_row.pack(fill="x", pady=8)
+        ttk.Label(period_row, text="报告周期:", width=22, anchor="e").pack(side="left", padx=(0, 10))
+        ttk.Combobox(period_row, textvariable=self.period_type, values=('周报', '季报'), state='readonly', width=8).pack(side="left")
+        ttk.Label(period_row, text="  指定季度:").pack(side="left")
+        ttk.Entry(period_row, textvariable=self.target_quarter, width=12).pack(side="left")
+        ttk.Label(period_row, text="留空取最新，如2026-Q2").pack(side="left", padx=8)
         csv_types = [("CSV/Excel 文件", "*.csv *.xlsx *.xls")]
+        excel_types = [("Excel 文件", "*.xlsx *.xls")]
         html_types = [("HTML 网页模板", "*.html *.htm")]
 
-        add_row(form_frame, "12366月度明细表:", self.path_12366, filetypes=csv_types)
-        
+        add_row(form_frame, "12366咨询明细表 (CSV):", self.path_12366, filetypes=csv_types)
+        add_row(form_frame, "办税服务厅明细表 (CSV):", self.path_hall, filetypes=csv_types)
+        add_row(form_frame, "大厅接听汇总表 (Excel):", self.path_stats, filetypes=excel_types)
+
         sep = ttk.Separator(form_frame, orient="horizontal")
         sep.pack(fill="x", pady=10)
-        
+
         add_row(form_frame, "前端模板文件 (HTML):", self.path_template, filetypes=html_types)
         add_row(form_frame, "报告保存位置 (目录):", self.dir_output, is_dir=True)
 
         # --- 进度显示与按钮区域 ---
         btn_frame = ttk.Frame(self.root)
         btn_frame.pack(fill="x", pady=15)
-        
+
         self.status_var = tk.StringVar(value="等待开始...")
         self.progress_var = tk.DoubleVar(value=0.0)
 
@@ -782,7 +1013,7 @@ class ReportApp:
         # 进度条控件
         self.progress_bar = ttk.Progressbar(btn_frame, orient="horizontal", variable=self.progress_var, mode="determinate", maximum=100)
         self.progress_bar.pack(fill="x", pady=(0, 10))
-        
+
         # 核心按钮
         self.generate_btn = ttk.Button(btn_frame, text="生成分析报告", style="Accent.TButton", command=self.start_generation)
         self.generate_btn.pack(fill="x", ipady=4)
@@ -794,7 +1025,7 @@ class ReportApp:
         self.log_text = tk.Text(log_frame, wrap="word", font=("Consolas", 9), bg="#1E1E1E", fg="#D4D4D4", height=8, borderwidth=0)
         scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
-        
+
         self.log_text.pack(side="left", fill="both", expand=True, padx=2, pady=2)
         scrollbar.pack(side="right", fill="y", pady=2)
 
@@ -813,18 +1044,21 @@ class ReportApp:
 
     def start_generation(self):
         paths = [
-            self.path_12366.get(), self.path_template.get(),
+            self.path_12366.get(), self.path_hall.get(),
+            self.path_stats.get(), self.path_template.get(),
             self.dir_output.get()
         ]
         if not all(paths):
             messagebox.showwarning("⚠️ 配置不完整", "请确保所有文件和目录路径已填写完整！")
             return
 
+        self.generation_period = 'quarter' if self.period_type.get() == '季报' else 'week'
+        self.generation_quarter = self.target_quarter.get().strip() or None
         # 锁定按钮，初始化状态
         self.generate_btn.config(state="disabled", text="正在处理数据...")
         self.update_progress(0, "正在启动后台引擎...")
         self.log_text.delete(1.0, tk.END)
-        
+
         # 开启后台线程执行业务逻辑，传入进度回调函数
         threading.Thread(target=self.run_task, daemon=True).start()
 
@@ -832,9 +1066,13 @@ class ReportApp:
         try:
             success = generate_offline_report(
                 self.path_12366.get(),
+                self.path_hall.get(),
+                self.path_stats.get(),
                 self.path_template.get(),
                 self.dir_output.get(),
-                progress_cb=self.update_progress  # <-- 将UI更新函数注入底层逻辑
+                progress_cb=self.update_progress,
+                period_type=self.generation_period,
+                target_quarter=self.generation_quarter
             )
             if success:
                 self.root.after(0, lambda: messagebox.showinfo("生成成功", f"分析报告已成功导出！\n您可以前往输出目录查看。"))
@@ -848,6 +1086,29 @@ class ReportApp:
                 self.update_progress(0, "等待开始...")
 
 if __name__ == "__main__":
+    import argparse
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
+    parser = argparse.ArgumentParser(description='6月8日版12366周报 / 季报生成工具')
+    parser.add_argument('--input')
+    parser.add_argument('--hall', default='')
+    parser.add_argument('--hall-stats', default='')
+    parser.add_argument('--period', choices=('week', 'quarter'), default='week')
+    parser.add_argument('--quarter', help='如2026-Q2；留空取最新季度')
+    parser.add_argument('--template', default=get_default_template_path())
+    parser.add_argument('--output', default=os.path.join(get_app_base_path(), '生成报告'))
+    args = parser.parse_args()
+    if args.input:
+        try:
+            ok = generate_offline_report(args.input, args.hall, args.hall_stats,
+                                         args.template, args.output, period_type=args.period,
+                                         target_quarter=args.quarter)
+        except ValueError as exc:
+            parser.error(str(exc))
+        sys.exit(0 if ok else 1)
+    if tk is None:
+        parser.error('图形界面需要带tkinter的Python，或使用--input命令行生成报告')
     root = tk.Tk()
     app = ReportApp(root)
     root.mainloop()

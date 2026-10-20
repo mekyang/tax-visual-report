@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
-  Activity, MapPin, ChevronRight, Database,
+  Activity, MapPin, ChevronRight, Database, TrendingUp,
   ChevronLeft, Layers, X,
-  PieChart as PieChartIcon,
+  PieChart as PieChartIcon, ArrowUpRight, ArrowDownRight,
   PhoneCall, Terminal, ShieldCheck, Target,
-  MessageSquareWarning, Building2, Users
+  MessageSquareWarning
 } from 'lucide-react';
 import {
   BarChart, Bar, PieChart, Pie, Cell, Tooltip,
@@ -42,6 +42,16 @@ const getFallbackWeekStart = (dateStr: string | null | undefined): string | null
 const isInvalidCategoryName = (value: unknown): boolean => {
   const text = String(value ?? '').trim().toLowerCase();
   return !text || ['nan', 'none', 'null', 'na', 'n/a', '未知细分'].includes(text);
+};
+
+const formatRate = (rate: string | number | null | undefined): string => {
+  if (rate == null) return '--';
+  const str = String(rate).trim();
+  if (str.endsWith('%')) return str;
+  const num = parseFloat(str);
+  if (isNaN(num)) return str;
+  if (num <= 1) return `${(num * 100).toFixed(2)}%`;
+  return `${num.toFixed(2)}%`;
 };
 
 const normalizeReportPathNodes = (nodes: string[]): string[] => {
@@ -135,8 +145,8 @@ const HotTopicTable = ({ data, title }: { data: { name: string; value: number }[
 export default function CompleteDashboard() {
   const [selectedDistrict, setSelectedDistrict]   = useState<string | null>(null);
   const [drillPath, setDrillPath]                 = useState<string[]>([]);
-  const [activeL1Tab, setActiveL1Tab]             = useState<string>('');
-  const [highFreqPage, setHighFreqPage]           = useState(0);
+  const [expandedCities, setExpandedCities]       = useState<Record<string, boolean>>({});
+  const [activeChannelTab, setActiveChannelTab]   = useState<string>('12366热线');
   const [expandedInsights, setExpandedInsights]   = useState<Record<number, boolean>>({});
 
   // 直接读取后端预计算好的数据，不在前端做任何聚合
@@ -149,14 +159,13 @@ export default function CompleteDashboard() {
     <div className="min-h-screen flex items-center justify-center text-slate-400">数据加载中...</div>
   );
 
-  const { meta, channelSummary, globalTopicSummary, locationList,
-    l1TopicSummary, l3DetailSummary, l3Summary } = reportData;
+  const { meta, channelSummary, globalTopicSummary, locationList, tableHall } = reportData;
   const callVolume = reportData.callVolume ?? {};
   const callVolumeMeta = callVolume.meta ?? meta;
   const callVolumeChannelSummary = callVolume.channelSummary ?? channelSummary;
   const callVolumeLocationList = callVolume.locationList ?? locationList;
-  const displayDateStart = meta.currentMonthStart ?? meta.currentWeekStart ?? getFallbackWeekStart(meta.dateMax) ?? meta.dateMin;
-  const displayDateEnd = meta.currentMonthEnd ?? meta.currentWeekEnd ?? meta.dateMax;
+  const displayDateStart = meta.periodStart ?? meta.currentWeekStart ?? getFallbackWeekStart(meta.dateMax) ?? meta.dateMin;
+  const displayDateEnd = meta.periodEnd ?? meta.currentWeekEnd ?? meta.dateMax;
   const primaryHotlineCallTotal = useMemo(() => {
     const hotline = callVolumeChannelSummary.find((ch: any) =>
       String(ch.name ?? '').includes('12366')
@@ -187,36 +196,22 @@ export default function CompleteDashboard() {
       })),
   [callVolumeChannelSummary]);
 
-  // 征纳互动模板第一部分：初始化一级分类并分页展示最高频诉求。
-  useEffect(() => {
-    if (!activeL1Tab && l1TopicSummary?.length > 0) {
-      setActiveL1Tab(l1TopicSummary[0].name);
-    }
-  }, [l1TopicSummary, activeL1Tab]);
-
-  const highFreqTop10 = useMemo(() => ((l3DetailSummary || l3Summary || []) as any[]).slice(0, 10), [l3DetailSummary, l3Summary]);
-  const highFreqPageSize = 5;
-  const highFreqTotalPages = Math.max(1, Math.ceil(highFreqTop10.length / highFreqPageSize));
-  const highFreqPageItems = highFreqTop10.slice(highFreqPage * highFreqPageSize, highFreqPage * highFreqPageSize + highFreqPageSize);
-
-  useEffect(() => {
-    if (highFreqPage >= highFreqTotalPages) setHighFreqPage(0);
-  }, [highFreqPage, highFreqTotalPages]);
-
-  const activeL1Data = useMemo(() => {
-    const l1 = l1TopicSummary?.find((c: any) => c.name === activeL1Tab);
-    if (!l1) return { topicSummary: [], chartData: [] };
-    const top8 = l1.topicSummary.slice(0, 8);
+  // ── 当前 tab 对应的渠道话题数据：O(1) 查找，不遍历明细 ──
+  const activeChannelData = useMemo(() => {
+    const ch = channelSummary.find((c: any) => c.name === activeChannelTab);
+    if (!ch) return { topicSummary: [], chartData: [] };
+    const top8 = ch.topicSummary.slice(0, 8);
     const total = top8.reduce((s: number, t: any) => s + t.total, 0) || 1;
     return {
-      topicSummary: l1.topicSummary,
+      topicSummary: ch.topicSummary,
       chartData: top8.map((t: any, i: number) => ({
-        name: t.name, value: t.total,
+        name: t.name,
+        value: t.total,
         percent: ((t.total / total) * 100).toFixed(1),
         color: COLORS[i % COLORS.length],
       })),
     };
-  }, [l1TopicSummary, activeL1Tab]);
+  }, [channelSummary, activeChannelTab]);
 
   // ── 地市分布：无筛选时直接用后端排好序的 locationList ──
   // 有筛选（selectedDistrict）时前端过滤明细（此时 interactiveRows 仍保留）
@@ -370,6 +365,7 @@ export default function CompleteDashboard() {
   const clearAllFilters = useCallback(() => {
     setSelectedDistrict(null);
     setDrillPath([]);
+    setActiveChannelTab('12366热线');
   }, []);
 
   return (
@@ -380,7 +376,7 @@ export default function CompleteDashboard() {
         <div className="max-w-[1200px] mx-auto px-6 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-              <Terminal className="text-sky-500" size={20} /> 山东税务12366热线诉求分析月报
+              <Terminal className="text-sky-500" size={20} /> 山东税务12366热线诉求分析{meta.periodType === 'quarter' ? '季报' : '周报'}
             </h1>
             <p className="text-xs text-slate-500 font-mono mt-1">
               系统生成报表 | 载入明细 {meta.totalRecords.toLocaleString()} 条
@@ -432,99 +428,68 @@ export default function CompleteDashboard() {
             })()}
           </div>
 
-          {/* 最高频前十个诉求类别（紧凑单行+多维画像） */}
+          {/* 问题集中度分析：直接用 globalTopicSummary 前三 */}
           <div className="mb-8 p-5 bg-gradient-to-r from-slate-50 to-sky-50 rounded-xl border border-slate-200">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <div className="flex items-center gap-2">
-                <Target size={18} className="text-sky-500" />
-                <span className="text-sm font-bold text-slate-700">最高频前十个诉求类别</span>
-                <span className="text-xs text-slate-400">每页5项</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setHighFreqPage(p => Math.max(0, p - 1))}
-                  disabled={highFreqPage === 0}
-                  className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 disabled:opacity-40 disabled:cursor-not-allowed hover:border-sky-200"
-                  title="上一页"
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                <span className="text-xs font-mono text-slate-500">{highFreqPage + 1}/{highFreqTotalPages}</span>
-                <button
-                  onClick={() => setHighFreqPage(p => Math.min(highFreqTotalPages - 1, p + 1))}
-                  disabled={highFreqPage >= highFreqTotalPages - 1}
-                  className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 disabled:opacity-40 disabled:cursor-not-allowed hover:border-sky-200"
-                  title="下一页"
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
+            <div className="flex items-center gap-2 mb-4">
+              <Target size={18} className="text-sky-500" />
+              <span className="text-sm font-bold text-slate-700">问题集中度分析</span>
             </div>
-            <div className="space-y-1.5">
-              {highFreqPageItems.map((item: any, i: number) => {
-                const detail = item.topDistrict ? item : null;
-                const rank = highFreqPage * highFreqPageSize + i + 1;
+            <div className="grid grid-cols-3 gap-4">
+              {globalTopicSummary.slice(0, 3).map((ch: any, idx: number) => {
+                const topTopic = ch.hotTopics[0];
+                const concentration = ch.total > 0 && topTopic ? Math.min((topTopic.value / ch.total) * 100, 100).toFixed(1) : '0.0';
                 return (
-                  <div key={i} className="flex items-center p-2.5 bg-white rounded-lg border border-slate-100 hover:border-sky-200 transition-colors">
-                    <span className="text-xs font-mono font-bold text-white bg-sky-500 w-5 h-5 rounded-full flex items-center justify-center shrink-0 mr-3">{rank}</span>
-                    <span className="text-sm text-slate-800 font-medium shrink-0" title={item.name}>{item.name}</span>
-                    <span className="ml-3 px-2 py-0.5 rounded-md bg-sky-50 text-sky-700 text-xs font-bold shrink-0">{(item.value || item.total || 0).toLocaleString()}件</span>
-                    <span className="flex-1" />
-                    <span className="w-px h-5 bg-slate-200 mx-4 shrink-0" />
-                    {detail ? (
-                      <span className="flex items-center gap-3 shrink-0 text-[11px] text-slate-400">
-                        <span className="whitespace-nowrap">最高频出现在：</span>
-                        <span className="flex items-center gap-1"><MapPin size={11} className="text-sky-400" />{detail.topDistrict?.name || '-'}</span>
-                        <span className="flex items-center gap-1"><Building2 size={11} className="text-violet-400" />{detail.topIndustry?.name || '-'}</span>
-                        <span className="flex items-center gap-1"><Users size={11} className="text-emerald-400" />{detail.topPersona?.name || '-'}</span>
-                        <span className="flex items-center gap-1"><Target size={11} className="text-amber-400" />{detail.topPeriod?.name || '-'}</span>
-                      </span>
-                    ) : (
-                      <span className="text-[11px] text-slate-400 shrink-0">{item.value.toLocaleString()} 件</span>
-                    )}
+                  <div key={idx} className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
+                    <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-50">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                      <span className="text-lg font-bold text-slate-800">{ch.name}</span>
+                    </div>
+                    <div className="flex-1 flex flex-col justify-center">
+                      <div className="text-sm text-slate-600 mb-2">该大类下，排名第一的细分问题占比：</div>
+                      <div className="text-3xl font-black text-sky-600 mb-3">{concentration}%</div>
+                      <div className="mt-auto text-xs text-slate-500 bg-slate-50 p-3 rounded-lg leading-relaxed border border-slate-100">
+                        <span className="font-bold text-slate-700">首要细分：</span>
+                        {topTopic?.name ?? '暂无数据'}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* L1 分类 Tab */}
-          <div className="flex gap-4 mb-6 border-b border-slate-100 pb-3 overflow-x-auto">
-            {(l1TopicSummary || []).map((ch: any) => (
+          {/* 渠道 Tab */}
+          <div className="flex gap-4 mb-6 border-b border-slate-100 pb-3">
+            {channelSummary.map((ch: any) => (
               <button
                 key={ch.name}
-                onClick={() => setActiveL1Tab(ch.name)}
-                className={`px-5 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeL1Tab === ch.name ? 'bg-sky-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                onClick={() => setActiveChannelTab(ch.name)}
+                className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeChannelTab === ch.name ? 'bg-sky-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
               >
                 {ch.name}
               </button>
             ))}
           </div>
 
-          {/* 常规结构分析 */}
+          {/* 常规结构分析（使用 activeChannelData，O(1) 查找）*/}
           <div className="animate-in fade-in duration-300">
-            <div className="mb-4">
-              <h4 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                <PieChartIcon size={16} className="text-sky-500" /> 常规结构分析 ({activeL1Tab})
-              </h4>
-              <p className="text-xs text-slate-500 mt-1">
-                用于查看当前一级诉求下的二级类别占比，并展开每个类别中最常被咨询的具体问题。
-              </p>
-            </div>
+            <h4 className="text-base font-bold mb-4 text-slate-800 flex items-center gap-2">
+              <PieChartIcon size={16} className="text-sky-500" /> 常规结构分析 ({activeChannelTab})
+            </h4>
             <div className="grid grid-cols-12 gap-6 mb-8">
               <div className="col-span-4 bg-slate-50 rounded-xl p-4 border border-slate-100">
                 <div className="h-[220px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={activeL1Data.chartData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={2} dataKey="value" nameKey="name">
-                        {activeL1Data.chartData.map((entry: any, index: number) => (
+                      <Pie data={activeChannelData.chartData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={2} dataKey="value" nameKey="name">
+                        {activeChannelData.chartData.map((entry: any, index: number) => (
                           <Cell key={index} fill={entry.color} />
                         ))}
                       </Pie>
                       <Tooltip
                         contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                         formatter={(value: any, name: any) => {
-                          const item = activeL1Data.chartData.find((c: any) => c.name === name);
+                          const item = activeChannelData.chartData.find((c: any) => c.name === name);
                           return [`${(value as number).toLocaleString()} 件 (${item?.percent}%)`, name];
                         }}
                       />
@@ -532,7 +497,7 @@ export default function CompleteDashboard() {
                   </ResponsiveContainer>
                 </div>
                 <div className="space-y-2 mt-1 max-h-[180px] overflow-y-auto">
-                  {activeL1Data.chartData.slice(0, 5).map((c: any, i: number) => (
+                  {activeChannelData.chartData.slice(0, 5).map((c: any, i: number) => (
                     <div key={i} className="flex items-center justify-between text-xs px-2 py-1.5 bg-white rounded-lg border border-slate-100">
                       <div className="flex items-center gap-2">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c.color }} />
@@ -545,11 +510,11 @@ export default function CompleteDashboard() {
               </div>
 
               <div className="col-span-8 h-[420px] overflow-y-auto pr-2">
-                {activeL1Data.topicSummary.map((ch: any, idx: number) =>
-                  ch.hotTopics?.length > 0 && (
+                {activeChannelData.topicSummary.map((ch: any, idx: number) =>
+                  ch.hotTopics.length > 0 && (
                     <div key={idx} className="mb-4 p-3 bg-white rounded-xl border border-slate-100">
                       <div className="flex items-center gap-2 mb-3">
-                        <div className="w-2 h-4 rounded-sm" style={{ backgroundColor: activeL1Data.chartData[idx]?.color || '#94a3b8' }} />
+                        <div className="w-2 h-4 rounded-sm" style={{ backgroundColor: activeChannelData.chartData[idx]?.color || '#94a3b8' }} />
                         <span className="text-sm font-bold text-slate-700">{ch.name}</span>
                         <span className="text-xs text-slate-400 ml-1">该分类共 {ch.total.toLocaleString()} 件</span>
                       </div>
@@ -566,7 +531,7 @@ export default function CompleteDashboard() {
                                   className="h-full rounded-full"
                                   style={{
                                     width: `${ch.hotTopics[0].value > 0 ? (topic.value / ch.hotTopics[0].value) * 100 : 0}%`,
-                                    backgroundColor: activeL1Data.chartData[idx]?.color || '#94a3b8',
+                                    backgroundColor: activeChannelData.chartData[idx]?.color || '#94a3b8',
                                   }}
                                 />
                               </div>
@@ -581,8 +546,52 @@ export default function CompleteDashboard() {
               </div>
             </div>
 
+            {/* 异常波动监测 */}
+            {reportData.consultAnomalies?.length > 0 && (
+              <div className="border-t border-slate-100 pt-6 mb-8">
+                <h4 className="text-base font-bold mb-4 text-slate-800 flex items-center gap-2">
+                  <TrendingUp size={16} className="text-rose-500" /> 全局异常波动监测
+                </h4>
+                <div className="grid grid-cols-3 gap-3">
+                  {reportData.consultAnomalies.slice(0, 6).map((item: any, idx: number) => (
+                    <div key={idx} className={`p-4 bg-white border rounded-xl shadow-sm relative overflow-hidden ${item.trend === 'up' ? 'border-rose-100' : 'border-emerald-100'}`}>
+                      <div className={`absolute top-0 left-0 w-1 h-full ${item.trend === 'up' ? 'bg-rose-400' : 'bg-emerald-400'}`} />
+                      <div className="pl-2">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${item.trend === 'up' ? 'bg-rose-50 text-rose-500' : 'bg-emerald-50 text-emerald-500'}`}>
+                            {item.trend === 'up' ? '激增' : '激减'}
+                          </span>
+                        </div>
+                        <div className="text-sm font-bold text-slate-800 mb-3 leading-tight" title={item.name}>
+                          {item.name.length > 18 ? item.name.slice(0, 18) + '…' : item.name}
+                        </div>
+                        <div className="flex items-end justify-between">
+                          <div className="text-center">
+                            <div className="text-xs text-slate-400">{meta.periodType === 'quarter' ? '上季度' : '上周'}</div>
+                            <div className="text-sm font-semibold text-slate-500">{item.prevRate}</div>
+                          </div>
+                          <div className="flex flex-col items-center">
+                            {item.trend === 'up' ? <ArrowUpRight size={16} className="text-rose-500" /> : <ArrowDownRight size={16} className="text-emerald-500" />}
+                            <span className={`text-[10px] font-bold ${item.trend === 'up' ? 'text-rose-400' : 'text-emerald-400'}`}>{item.changePoints}件</span>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-xs text-slate-400">{meta.periodType === 'quarter' ? '本季度' : '本周'}</div>
+                            <div className={`text-base font-black ${item.trend === 'up' ? 'text-rose-600' : 'text-emerald-600'}`}>{item.currRate}</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-xs text-slate-400">变化率</div>
+                            <div className={`text-sm font-bold ${item.trend === 'up' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                              {item.trend === 'up' ? '+' : '-'}{item.changePct}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-
         </GlassCard>
 
 
@@ -1020,6 +1029,93 @@ export default function CompleteDashboard() {
             </div>
           </GlassCard>
         )}
+
+        {/* 地市接听明细表 */}
+        {tableHall && tableHall.length > 0 && (
+          <GlassCard title="各地市办税服务厅接听情况" icon={PhoneCall}>
+            <div className="max-h-[600px] overflow-y-auto pr-2 space-y-3">
+              {tableHall.map((cityRow: any, cityIdx: number) => (
+                <div key={cityIdx} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                  <div
+                    className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors"
+                    onClick={() => {
+                      if (cityRow.districts?.length > 0) {
+                        setExpandedCities(prev => ({ ...prev, [cityRow.name]: !prev[cityRow.name] }));
+                      }
+                    }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-sky-100 rounded-lg flex items-center justify-center text-sky-600 font-bold text-sm">{cityIdx + 1}</div>
+                      <span className="font-bold text-slate-700">{cityRow.name}</span>
+                      {cityRow.districts?.length > 0 && (
+                        <span className="text-xs text-slate-400 ml-2">
+                          {expandedCities[cityRow.name] ? '[收起区县]' : '[展开区县]'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-6 text-sm">
+                      <div className="text-right">
+                        <div className="text-xs text-slate-400">转人工语音量</div>
+                        <div className="font-bold text-slate-700">{cityRow.voice.toLocaleString()}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-slate-400">人工接听量</div>
+                        <div className="font-bold text-sky-600">{cityRow.human.toLocaleString()}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-slate-400">接听率</div>
+                        <div className={`font-bold ${parseFloat(cityRow.rate) < 90 ? 'text-rose-500' : 'text-emerald-600'}`}>{formatRate(cityRow.rate)}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-slate-400">好差评推送率</div>
+                        <div className="font-bold text-slate-700">{cityRow.push}</div>
+                      </div>
+                      {cityRow.districts?.length > 0 ? (
+                        <ChevronRight size={16} className={`text-slate-400 transition-transform ${expandedCities[cityRow.name] ? 'rotate-90' : ''}`} />
+                      ) : <div className="w-4" />}
+                    </div>
+                  </div>
+
+                  {expandedCities[cityRow.name] && cityRow.districts && (
+                    <div className="overflow-x-auto bg-white">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50/50 text-slate-500">
+                          <tr>
+                            <th className="py-2.5 px-4 text-left font-medium w-1/4">区县/办税厅</th>
+                            <th className="py-2.5 px-3 text-right font-medium">转人工语音量</th>
+                            <th className="py-2.5 px-3 text-right font-medium">人工接听量</th>
+                            <th className="py-2.5 px-3 text-right font-medium">接听率</th>
+                            <th className="py-2.5 px-3 text-right font-medium">好差评推送率</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-slate-600">
+                          {cityRow.districts.map((dist: any, distIdx: number) => (
+                            <tr key={distIdx} className="border-b border-slate-50 hover:bg-sky-50/30 transition-colors">
+                              <td className="py-2.5 px-4">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-1 h-1 rounded-full bg-slate-300" />
+                                  <span className="font-medium text-slate-700">{dist.name}</span>
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 text-right">{dist.voice.toLocaleString()}</td>
+                              <td className="py-2.5 px-3 text-right text-sky-600 font-medium">{dist.human.toLocaleString()}</td>
+                              <td className="py-2.5 px-3 text-right">
+                                <span className={parseFloat(dist.rate) < 90 ? 'text-rose-500 font-bold' : 'text-emerald-600 font-medium'}>{formatRate(dist.rate)}</span>
+                              </td>
+                              <td className="py-2.5 px-3 text-right">{dist.push}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </GlassCard>
+        )}
+
+
 
       </div>
     </div>
