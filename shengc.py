@@ -234,7 +234,7 @@ def filter_to_quarter(df, start):
     dates = parse_period_dates(df[col])
     return df.loc[(dates.dt.date >= start) & (dates.dt.date < shift_quarter(start, 1))].copy()
 
-def build_quarter_data(df_12366, df_hall, target=None, progress_cb=None):
+def build_quarter_data(df_12366, target=None, progress_cb=None):
     start = choose_quarter(df_12366, target)
     current = filter_to_quarter(df_12366, start)
     if current.empty:
@@ -243,7 +243,7 @@ def build_quarter_data(df_12366, df_hall, target=None, progress_cb=None):
     report = build_report_data(current, progress_cb=progress_cb)
     if not report['meta']['totalRecords']:
         raise ValueError('所选季度没有有效分类记录')
-    calls = build_call_volume_data(filter_to_quarter(pd.concat([df_12366, df_hall], ignore_index=True), start))
+    calls = build_call_volume_data(current)
     label = f'{start.year}年第{(start.month - 1) // 3 + 1}季度'
     report['meta'].update({
         'periodType': 'quarter', 'periodLabel': label,
@@ -658,145 +658,21 @@ def build_report_data(df, progress_cb=None):
     }
 
 # ==========================================
-# 4. 解析大厅汇总数据
-# ==========================================
-def parse_hall_stats(hall_file_path):
-    print(f"\n====== 开始解析办税大厅汇总表 ======")
-    if not os.path.exists(hall_file_path):
-        print(f"⚠️ 警告: 找不到文件 {hall_file_path}")
-        return [], []
-
-    try:
-        df = read_excel_compat(hall_file_path)
-        if df.empty or len(df.columns) < 6:
-            print("⚠️ 警告: 大厅汇总表列数不足，无法解析。")
-            return [], []
-
-        col_city = df.columns[0]
-        col_unit = df.columns[1]
-
-        df[col_city] = df[col_city].apply(clean_text).replace('', pd.NA).ffill().fillna('')
-        df[col_unit] = df[col_unit].apply(clean_text)
-
-        table_hall = []
-        idx = 1
-
-        for city_name, group in df.groupby(col_city, sort=False):
-            city_name = clean_text(city_name)
-            if city_name in ('0', '全省', '全省合计') or '合计' in city_name:
-                continue
-            if not city_name.endswith('市'):
-                city_name += '市'
-            if city_name in EXCLUDED_CITIES:
-                continue
-
-            districts     = []
-            v_total = h_total = 0
-            push_sum = push_cnt = 0
-
-            for _, row in group.iterrows():
-                unit = clean_text(row[col_unit])
-                if unit in ('0', '') or '汇总' in unit or '合计' in unit or unit == city_name:
-                    continue
-
-                try: v = int(float(clean_text(row.iloc[2]) or 0))
-                except: v = 0
-                try: h = int(float(clean_text(row.iloc[3]) or 0))
-                except: h = 0
-
-                v_total += v
-                h_total += h
-
-                r_str, _ = format_percent_cell(row.iloc[4])
-                push_str, push_float = format_percent_cell(row.iloc[5])
-                push_sum += push_float
-                push_cnt += 1
-
-                districts.append({
-                    'name': unit,
-                    'voice': v, 'human': h,
-                    'rate': r_str,
-                    'push': push_str,
-                })
-
-            if districts:
-                city_rate_str = f"{(h_total / v_total * 100):.2f}%" if v_total > 0 else "0.00%"
-                city_push_str = f"{(push_sum / push_cnt):.2f}%" if push_cnt > 0 else "0.00%"
-
-                table_hall.append({
-                    'id': str(idx),
-                    'name': city_name,
-                    'voice': v_total,
-                    'human': h_total,
-                    'rate': city_rate_str,
-                    'push': city_push_str,
-                    'expanded': False,
-                    'districts': districts,
-                })
-                idx += 1
-                print(f"成功提取: {city_name} (包含 {len(districts)} 个区县)")
-
-        print(f"====== 大厅汇总表解析完成！======\n")
-        return [], table_hall
-
-    except Exception as e:
-        print(f"解析大厅汇总表失败: {e}")
-        traceback.print_exc()
-        return [], []
-
-def compute_answer_rates(table_hall, channel_summary):
-    total_voice = sum(c.get('voice', 0) for c in table_hall)
-    total_human = sum(c.get('human', 0) for c in table_hall)
-    rate_12366 = round(total_human / total_voice * 100, 1) if total_voice > 0 else None
-
-    for ch in channel_summary:
-        if ch['name'] == '12366热线':
-            ch['answerRate'] = rate_12366
-        else:
-            ch['answerRate'] = None
-    return channel_summary
-
-def format_percent_cell(value):
-    if value is None or pd.isna(value):
-        return '0.00%', 0.0
-    if isinstance(value, (int, float)):
-        pct = float(value) * 100 if float(value) <= 1 else float(value)
-        return f"{pct:.2f}%", pct
-
-    text = clean_text(value)
-    if not text:
-        return '0.00%', 0.0
-    raw = text.rstrip('%')
-    try:
-        num = float(raw)
-        if not text.endswith('%') and num <= 1:
-            num *= 100
-        return f"{num:.2f}%", num
-    except:
-        return text, 0.0
-
-# ==========================================
 # 5. 生成报告核心逻辑
 # ==========================================
-def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, template_path, output_dir,
+def generate_offline_report(data_12366_path, template_path, output_dir,
                             progress_cb=None, period_type='week', target_quarter=None):
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始生成双渠道报表...")
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始生成12366报表...")
 
     if progress_cb: progress_cb(5, "正在读取 12366 明细表...")
     df_12366 = load_detail_file(data_12366_path, '12366热线')
 
-    if progress_cb: progress_cb(15, "正在读取 办税服务厅 明细表...")
-    df_hall  = load_detail_file(data_hall_path,  '办税服务厅')
-
-    if progress_cb: progress_cb(25, "正在合并基础数据源...")
-    df_combined = pd.concat([df_12366, df_hall], ignore_index=True)
-
-    if df_combined.empty:
-        print("❌ 错误：12366 和 办税服务厅 的明细数据均未成功加载，无法生成报告！")
+    if df_12366.empty:
+        print("❌ 错误：12366明细数据未成功加载，无法生成报告！")
         return False
 
     if period_type == 'quarter':
-        report_data, call_volume_data = build_quarter_data(df_12366, df_hall, target_quarter, progress_cb)
+        report_data, call_volume_data = build_quarter_data(df_12366, target_quarter, progress_cb)
     elif period_type == 'week':
         # 构建主报告数据（传递回调函数，以体现行级处理进度）
         week_start = get_latest_week_start(df_12366)
@@ -807,30 +683,13 @@ def generate_offline_report(data_12366_path, data_hall_path, hall_stats_path, te
         report_history_data = build_report_data(df_12366)
         report_data['consultAnomalies'] = report_history_data.get('consultAnomalies', [])
         report_data['bestPracticeInsights'] = report_history_data.get('bestPracticeInsights', [])
-        # Call-volume section keeps the original combined-detail scope and does not
-        # require business-category fields, because hall detail rows may not carry them.
-        # It uses the same latest-week window as the main 12366 report.
-        call_volume_data = build_call_volume_data(filter_to_week(df_combined, week_start))
+        call_volume_data = build_call_volume_data(df_12366_week)
 
     else:
         raise ValueError('报告周期只能为 week 或 quarter')
 
-    if progress_cb: progress_cb(75, "正在解析大厅接听汇总表...")
-    table_etax, table_hall = parse_hall_stats(hall_stats_path)
-    report_data['tableEtax'] = table_etax
-    report_data['tableHall'] = table_hall
-
-    report_data['channelSummary'] = compute_answer_rates(
-        table_hall, report_data['channelSummary']
-    )
-    report_data['callVolume'] = {
-        'meta': call_volume_data.get('meta', {}),
-        'channelSummary': compute_answer_rates(
-            table_hall, call_volume_data.get('channelSummary', [])
-        ),
-        'locationList': call_volume_data.get('locationList', []),
-        'trendData': call_volume_data.get('trendData', []),
-    }
+    if progress_cb: progress_cb(75, "正在生成12366来电量指标...")
+    report_data['callVolume'] = call_volume_data
 
     if progress_cb: progress_cb(85, "数据处理完毕，正在嵌入 HTML 网页模板...")
     try:
@@ -916,8 +775,6 @@ class ReportApp:
         self.period_type = tk.StringVar(value='周报')
         self.target_quarter = tk.StringVar()
         self.path_12366 = tk.StringVar()
-        self.path_hall = tk.StringVar()
-        self.path_stats = tk.StringVar()
         self.path_template = tk.StringVar(value=get_default_template_path())
         self.dir_output = tk.StringVar(value=os.path.join(self.base_path, '生成报告'))
 
@@ -951,7 +808,7 @@ class ReportApp:
         title_lbl = tk.Label(header_frame, text="山东税务12366热线诉求分析周报", font=("Microsoft YaHei", 16, "bold"), bg="#F3F3F3", fg="#333333")
         title_lbl.pack(anchor="w")
 
-        desc_lbl = tk.Label(header_frame, text="配置基础明细与汇总表，一键渲染报告。", font=("Microsoft YaHei", 9), bg="#F3F3F3", fg="#666666")
+        desc_lbl = tk.Label(header_frame, text="选择12366咨询明细，一键生成周报或季报。", font=("Microsoft YaHei", 9), bg="#F3F3F3", fg="#666666")
         desc_lbl.pack(anchor="w", pady=(5, 0))
 
         form_frame = ttk.LabelFrame(self.root, text=" 数据源配置 ", style="Card.TLabelframe", padding=(15, 10))
@@ -986,12 +843,9 @@ class ReportApp:
         ttk.Entry(period_row, textvariable=self.target_quarter, width=12).pack(side="left")
         ttk.Label(period_row, text="留空取最新，如2026-Q2").pack(side="left", padx=8)
         csv_types = [("CSV/Excel 文件", "*.csv *.xlsx *.xls")]
-        excel_types = [("Excel 文件", "*.xlsx *.xls")]
         html_types = [("HTML 网页模板", "*.html *.htm")]
 
         add_row(form_frame, "12366咨询明细表 (CSV):", self.path_12366, filetypes=csv_types)
-        add_row(form_frame, "办税服务厅明细表 (CSV):", self.path_hall, filetypes=csv_types)
-        add_row(form_frame, "大厅接听汇总表 (Excel):", self.path_stats, filetypes=excel_types)
 
         sep = ttk.Separator(form_frame, orient="horizontal")
         sep.pack(fill="x", pady=10)
@@ -1044,8 +898,7 @@ class ReportApp:
 
     def start_generation(self):
         paths = [
-            self.path_12366.get(), self.path_hall.get(),
-            self.path_stats.get(), self.path_template.get(),
+            self.path_12366.get(), self.path_template.get(),
             self.dir_output.get()
         ]
         if not all(paths):
@@ -1066,8 +919,6 @@ class ReportApp:
         try:
             success = generate_offline_report(
                 self.path_12366.get(),
-                self.path_hall.get(),
-                self.path_stats.get(),
                 self.path_template.get(),
                 self.dir_output.get(),
                 progress_cb=self.update_progress,
@@ -1092,8 +943,6 @@ if __name__ == "__main__":
             stream.reconfigure(encoding='utf-8', errors='replace')
     parser = argparse.ArgumentParser(description='6月8日版12366周报 / 季报生成工具')
     parser.add_argument('--input')
-    parser.add_argument('--hall', default='')
-    parser.add_argument('--hall-stats', default='')
     parser.add_argument('--period', choices=('week', 'quarter'), default='week')
     parser.add_argument('--quarter', help='如2026-Q2；留空取最新季度')
     parser.add_argument('--template', default=get_default_template_path())
@@ -1101,8 +950,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.input:
         try:
-            ok = generate_offline_report(args.input, args.hall, args.hall_stats,
-                                         args.template, args.output, period_type=args.period,
+            ok = generate_offline_report(args.input, args.template, args.output, period_type=args.period,
                                          target_quarter=args.quarter)
         except ValueError as exc:
             parser.error(str(exc))

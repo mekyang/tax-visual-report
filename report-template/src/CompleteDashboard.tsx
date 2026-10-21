@@ -44,16 +44,6 @@ const isInvalidCategoryName = (value: unknown): boolean => {
   return !text || ['nan', 'none', 'null', 'na', 'n/a', '未知细分'].includes(text);
 };
 
-const formatRate = (rate: string | number | null | undefined): string => {
-  if (rate == null) return '--';
-  const str = String(rate).trim();
-  if (str.endsWith('%')) return str;
-  const num = parseFloat(str);
-  if (isNaN(num)) return str;
-  if (num <= 1) return `${(num * 100).toFixed(2)}%`;
-  return `${num.toFixed(2)}%`;
-};
-
 const normalizeReportPathNodes = (nodes: string[]): string[] => {
   const cleanNodes = nodes.map(n => String(n ?? '').trim()).filter(n => !isInvalidCategoryName(n));
   if (cleanNodes.length === 0) return [];
@@ -145,7 +135,6 @@ const HotTopicTable = ({ data, title }: { data: { name: string; value: number }[
 export default function CompleteDashboard() {
   const [selectedDistrict, setSelectedDistrict]   = useState<string | null>(null);
   const [drillPath, setDrillPath]                 = useState<string[]>([]);
-  const [expandedCities, setExpandedCities]       = useState<Record<string, boolean>>({});
   const [activeChannelTab, setActiveChannelTab]   = useState<string>('12366热线');
   const [expandedInsights, setExpandedInsights]   = useState<Record<number, boolean>>({});
 
@@ -159,7 +148,7 @@ export default function CompleteDashboard() {
     <div className="min-h-screen flex items-center justify-center text-slate-400">数据加载中...</div>
   );
 
-  const { meta, channelSummary, globalTopicSummary, locationList, tableHall } = reportData;
+  const { meta, channelSummary, globalTopicSummary, locationList } = reportData;
   const callVolume = reportData.callVolume ?? {};
   const callVolumeMeta = callVolume.meta ?? meta;
   const callVolumeChannelSummary = callVolume.channelSummary ?? channelSummary;
@@ -179,8 +168,6 @@ export default function CompleteDashboard() {
       name: ch.name,
       value: ch.total,
       percent: callVolumeMeta.totalRecords > 0 ? ((ch.total / callVolumeMeta.totalRecords) * 100).toFixed(1) : '0.0',
-      // answerRate 由后端计算（来自汇总表真实数据），null 表示不适用
-      answerRate: ch.answerRate != null ? ch.answerRate : null,
     })),
   [callVolumeChannelSummary, callVolumeMeta]);
 
@@ -1029,92 +1016,6 @@ export default function CompleteDashboard() {
             </div>
           </GlassCard>
         )}
-
-        {/* 地市接听明细表 */}
-        {tableHall && tableHall.length > 0 && (
-          <GlassCard title="各地市办税服务厅接听情况" icon={PhoneCall}>
-            <div className="max-h-[600px] overflow-y-auto pr-2 space-y-3">
-              {tableHall.map((cityRow: any, cityIdx: number) => (
-                <div key={cityIdx} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                  <div
-                    className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors"
-                    onClick={() => {
-                      if (cityRow.districts?.length > 0) {
-                        setExpandedCities(prev => ({ ...prev, [cityRow.name]: !prev[cityRow.name] }));
-                      }
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-sky-100 rounded-lg flex items-center justify-center text-sky-600 font-bold text-sm">{cityIdx + 1}</div>
-                      <span className="font-bold text-slate-700">{cityRow.name}</span>
-                      {cityRow.districts?.length > 0 && (
-                        <span className="text-xs text-slate-400 ml-2">
-                          {expandedCities[cityRow.name] ? '[收起区县]' : '[展开区县]'}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-6 text-sm">
-                      <div className="text-right">
-                        <div className="text-xs text-slate-400">转人工语音量</div>
-                        <div className="font-bold text-slate-700">{cityRow.voice.toLocaleString()}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs text-slate-400">人工接听量</div>
-                        <div className="font-bold text-sky-600">{cityRow.human.toLocaleString()}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs text-slate-400">接听率</div>
-                        <div className={`font-bold ${parseFloat(cityRow.rate) < 90 ? 'text-rose-500' : 'text-emerald-600'}`}>{formatRate(cityRow.rate)}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs text-slate-400">好差评推送率</div>
-                        <div className="font-bold text-slate-700">{cityRow.push}</div>
-                      </div>
-                      {cityRow.districts?.length > 0 ? (
-                        <ChevronRight size={16} className={`text-slate-400 transition-transform ${expandedCities[cityRow.name] ? 'rotate-90' : ''}`} />
-                      ) : <div className="w-4" />}
-                    </div>
-                  </div>
-
-                  {expandedCities[cityRow.name] && cityRow.districts && (
-                    <div className="overflow-x-auto bg-white">
-                      <table className="w-full text-xs">
-                        <thead className="bg-slate-50/50 text-slate-500">
-                          <tr>
-                            <th className="py-2.5 px-4 text-left font-medium w-1/4">区县/办税厅</th>
-                            <th className="py-2.5 px-3 text-right font-medium">转人工语音量</th>
-                            <th className="py-2.5 px-3 text-right font-medium">人工接听量</th>
-                            <th className="py-2.5 px-3 text-right font-medium">接听率</th>
-                            <th className="py-2.5 px-3 text-right font-medium">好差评推送率</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-slate-600">
-                          {cityRow.districts.map((dist: any, distIdx: number) => (
-                            <tr key={distIdx} className="border-b border-slate-50 hover:bg-sky-50/30 transition-colors">
-                              <td className="py-2.5 px-4">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-1 h-1 rounded-full bg-slate-300" />
-                                  <span className="font-medium text-slate-700">{dist.name}</span>
-                                </div>
-                              </td>
-                              <td className="py-2.5 px-3 text-right">{dist.voice.toLocaleString()}</td>
-                              <td className="py-2.5 px-3 text-right text-sky-600 font-medium">{dist.human.toLocaleString()}</td>
-                              <td className="py-2.5 px-3 text-right">
-                                <span className={parseFloat(dist.rate) < 90 ? 'text-rose-500 font-bold' : 'text-emerald-600 font-medium'}>{formatRate(dist.rate)}</span>
-                              </td>
-                              <td className="py-2.5 px-3 text-right">{dist.push}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </GlassCard>
-        )}
-
 
 
       </div>
