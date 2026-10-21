@@ -138,9 +138,14 @@ def load_detail_file(file_path, channel_name):
         ext = os.path.splitext(file_path)[-1].lower()
         df = read_csv_safe(file_path) if ext == '.csv' else read_excel_compat(file_path)
 
-        common_headers = ['登记日期', '受理时间', '日期', '业务类型', '业务类别']
+        df.columns = [str(col).lstrip('\ufeff').strip() for col in df.columns]
+        common_headers = ['登记日期', '受理时间', '日期', '业务类型', '业务类别', '问题类型']
         if not any(header in df.columns for header in common_headers):
             df = read_csv_safe(file_path, header=1) if ext == '.csv' else read_excel_compat(file_path, header=1)
+            df.columns = [str(col).lstrip('\ufeff').strip() for col in df.columns]
+
+        if not any(col in df.columns for col in ('业务类型', '问题类型')):
+            raise ValueError('缺少分类列：需要“业务类型”或“问题类型”，请检查表头。')
 
         df = df.fillna('')
 
@@ -151,10 +156,15 @@ def load_detail_file(file_path, channel_name):
                     date_field = col
                     break
 
-        df['统一日期'] = df[date_field] if date_field else ''
+        if not date_field:
+            raise ValueError('未找到日期列：需要“登记日期”“受理时间”或其他日期/时间列。')
+        df['统一日期'] = df[date_field]
         df['数据来源渠道'] = channel_name
         print(f"✅ 成功加载 [{channel_name}] 明细数据: {len(df)} 条")
+        print('分类字段：' + ('业务类型（为空时使用问题类型）' if '业务类型' in df.columns else '问题类型'))
         return df
+    except ValueError:
+        raise
     except Exception as e:
         print(f"❌ 加载 [{channel_name}] 失败: {e}")
         return pd.DataFrame()
@@ -394,7 +404,7 @@ def build_report_data(df, progress_cb=None):
         except:
             continue
 
-        raw_type = clean_text(row.get('业务类型', ''))
+        raw_type = clean_text(row.get('业务类型', '')) or clean_text(row.get('问题类型', ''))
         cat      = clean_text(row.get('业务类别', ''))
         lv3      = clean_text(row.get('举报小类', '')).replace(',', '、').replace('，', '、')
         loc      = parse_location(row.get('问题发生地', ''))
