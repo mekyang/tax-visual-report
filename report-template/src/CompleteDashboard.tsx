@@ -5,8 +5,7 @@ import {
   Activity, MapPin, ChevronRight, Database, TrendingUp,
   ChevronLeft, Layers, X,
   PieChart as PieChartIcon, ArrowUpRight, ArrowDownRight,
-  PhoneCall, Terminal, ShieldCheck, Target,
-  MessageSquareWarning
+  PhoneCall, Terminal, ShieldCheck, Target
 } from 'lucide-react';
 import {
   BarChart, Bar, PieChart, Pie, Cell, Tooltip,
@@ -97,41 +96,6 @@ const SectionHeader = ({ title, step }: { title: string; step: string }) => (
   </div>
 );
 
-const HotTopicTable = ({ data, title }: { data: { name: string; value: number }[]; title?: string }) => (
-  <div className="overflow-x-auto rounded-xl border border-slate-200">
-    {title && (
-      <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-sm font-bold text-slate-700">{title}</div>
-    )}
-    <table className="w-full text-sm text-left">
-      <thead className="bg-slate-50/80 text-slate-500 font-medium">
-        <tr>
-          <th className="py-2.5 px-4 border-b border-slate-100 w-10 text-center">序号</th>
-          <th className="py-2.5 px-4 border-b border-slate-100">热点问题 / 类别</th>
-          <th className="py-2.5 px-4 border-b border-slate-100 text-right w-28">咨询数量</th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((row, i) => (
-          <tr key={i} className="border-b border-slate-50 hover:bg-sky-50/40 transition-colors">
-            <td className="py-2.5 px-4 text-center text-slate-400 font-mono text-xs">{i + 1}</td>
-            <td className="py-2.5 px-4 text-slate-700 font-medium">{row.name}</td>
-            <td className="py-2.5 px-4 text-right">
-              <span className={`font-bold ${i < 3 ? 'text-sky-600' : 'text-slate-600'}`}>{row.value.toLocaleString()}</span>
-              <span className="text-slate-400 text-xs ml-1">件</span>
-            </td>
-          </tr>
-        ))}
-        {data.length === 0 && (
-          <tr><td colSpan={3} className="py-6 text-center text-slate-400 text-sm">暂无数据</td></tr>
-        )}
-      </tbody>
-    </table>
-  </div>
-);
-
-// ==========================================
-// 4. 主应用程序
-// ==========================================
 export default function CompleteDashboard() {
   const [selectedDistrict, setSelectedDistrict]   = useState<string | null>(null);
   const [drillPath, setDrillPath]                 = useState<string[]>([]);
@@ -260,6 +224,12 @@ export default function CompleteDashboard() {
       markHasChildren(tree);
     }
 
+    // 分类树仅展示问题解答；原二级分类直接作为顶层。
+    tree = Object.fromEntries(
+      Object.entries(tree['问题解答']?.children ?? {})
+        .filter(([name]) => !['涉税举报', '服务投诉'].includes(name))
+    );
+
     // 沿 drillPath 导航到当前层
     let current = tree;
     for (const step of drillPath) {
@@ -272,76 +242,6 @@ export default function CompleteDashboard() {
       .map(([name, node]: any) => ({ name, value: node.value, hasChildren: node.hasChildren }))
       .sort((a: any, b: any) => b.value - a.value);
   }, [selectedDistrict, drillPath, reportData.globalTypeTree, reportData.interactiveRows]);
-
-  // ── 投诉按地市统计（仅统计服务质效、服务言行、侵害权益类别）──
-  const complaintByCity = useMemo(() => {
-    const counts: Record<string, number> = {};
-    const validComplaintCats = ['服务质效', '服务言行', '侵害权益'];
-
-    (reportData.interactiveRows || []).forEach((row: any) => {
-      const cat = String(row.cat || '');
-      const type = String(row.type || '');
-
-      // 检查是否属于指定的投诉类别（在cat或type字段中匹配）
-      const isValidComplaint = validComplaintCats.some(validCat =>
-        cat.includes(validCat) || type.includes(validCat)
-      );
-
-      if (isValidComplaint && row.loc) {
-        counts[row.loc] = (counts[row.loc] || 0) + row.count;
-      }
-    });
-
-    return Object.entries(counts)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [reportData.interactiveRows]);
-
-  // ── 涉税投诉统计：从 globalTypeTree 的"涉税投诉"大类下获取二级分类 ──
-  const taxComplaintData = useMemo(() => {
-    const tree = reportData.globalTypeTree || {};
-    const taxComplaintNode = tree['涉税举报'];
-
-    if (!taxComplaintNode || !taxComplaintNode.children) {
-      return { topics: [], byCity: [], total: 0 };
-    }
-
-    // 获取二级分类（话题）
-    const topics = Object.entries(taxComplaintNode.children)
-      .map(([name, node]: any) => ({ name, value: node.value }))
-      .sort((a: any, b: any) => b.value - a.value);
-
-    const total = topics.reduce((sum, item) => sum + item.value, 0);
-
-    // 按地市统计：从 interactiveRows 中筛选属于涉税投诉大类下的数据
-    const cityCounts: Record<string, number> = {};
-    const taxComplaintSubCats = Object.keys(taxComplaintNode.children);
-
-    (reportData.interactiveRows || []).forEach((row: any) => {
-      const cat = String(row.cat || '');
-      const type = String(row.type || '');
-
-      // 检查是否属于涉税投诉大类下的二级分类
-      const isTaxComplaint = taxComplaintSubCats.some(subCat =>
-        cat.includes(subCat) || type.includes(subCat)
-      );
-
-      if (isTaxComplaint && row.loc) {
-        cityCounts[row.loc] = (cityCounts[row.loc] || 0) + row.count;
-      }
-    });
-
-    const byCity = Object.entries(cityCounts)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-
-    return { topics, byCity, total };
-  }, [reportData.globalTypeTree, reportData.interactiveRows]);
-
-  // 解构涉税投诉数据
-  const taxComplaintTopics = taxComplaintData.topics;
-  const taxComplaintByCity = taxComplaintData.byCity;
-  const taxComplaintTotal = taxComplaintData.total;
 
   // ── 处理函数 ──
   const handleDistrictClick = useCallback((districtId: string) => {
@@ -631,7 +531,7 @@ export default function CompleteDashboard() {
           {/* 下钻图表：使用预计算树 */}
           <GlassCard
             title={
-              <div className="flex items-center gap-1 text-sm font-normal">
+              <div className="flex flex-wrap items-center gap-1 text-sm font-normal">
                 <span className="text-slate-500 cursor-pointer hover:text-slate-800" onClick={() => setDrillPath([])}>
                   全部分类（点击蓝字可下钻）
                 </span>
@@ -644,7 +544,7 @@ export default function CompleteDashboard() {
               </div>
             }
             icon={Layers}
-            className="col-span-8 h-[500px]"
+            className="col-span-8 h-[500px] min-h-0"
             action={drillPath.length > 0 && (
               <button
                 onClick={() => setDrillPath(drillPath.slice(0, -1))}
@@ -654,27 +554,35 @@ export default function CompleteDashboard() {
               </button>
             )}
           >
-            <div className="w-full h-full pb-2">
+            <div className="w-full h-full overflow-y-auto overflow-x-hidden overscroll-contain pb-2">
               {drillDownData.length > 0 ? (
+                <div style={{ height: Math.max(400, drillDownData.length * 52 + 24), width: '100%' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={drillDownData} layout="vertical" margin={{ left: 10, right: 60, top: 10, bottom: 10 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="#f1f5f9" />
                     <XAxis type="number" hide />
                     <YAxis
-                      dataKey="name" type="category" width={160} axisLine={false} tickLine={false} interval={0}
+                      dataKey="name" type="category" width={206} axisLine={false} tickLine={false} interval={0}
                       tick={(props) => {
                         const { x, y, payload } = props;
                         const node = drillDownData.find((d: any) => d.name === payload.value);
                         const isClickable = node?.hasChildren;
+                        const label = String(payload.value);
+                        const lines = label.length > 14
+                          ? [label.slice(0, 14), label.length > 28 ? label.slice(14, 27) + '…' : label.slice(14)]
+                          : [label];
                         return (
                           <text
-                            x={x} y={y} dy={4} textAnchor="end"
+                            x={x} y={y} textAnchor="end"
                             fill={isClickable ? '#0284c7' : '#475569'}
-                            fontSize={13}
+                            fontSize={12}
                             style={{ cursor: isClickable ? 'pointer' : 'default' }}
                             onClick={() => isClickable && setDrillPath([...drillPath, payload.value])}
                           >
-                            {payload.value.length > 12 ? payload.value.substring(0, 12) + '...' : payload.value}
+                            <title>{label}</title>
+                            {lines.map((line, index) => (
+                              <tspan key={index} x={x} dy={index === 0 ? (lines.length > 1 ? -5 : 4) : 15}>{line}</tspan>
+                            ))}
                           </text>
                         );
                       }}
@@ -685,7 +593,7 @@ export default function CompleteDashboard() {
                       formatter={(value: any) => [`${value?.toLocaleString()} 件`, '数量']}
                     />
                     <Bar
-                      dataKey="value" radius={[0, 4, 4, 0]} barSize={32}
+                      dataKey="value" radius={[0, 4, 4, 0]} barSize={24}
                       onClick={(data: any) => data.hasChildren && data.name && setDrillPath([...drillPath, data.name])}
                       style={{ cursor: 'pointer' }}
                     >
@@ -695,10 +603,11 @@ export default function CompleteDashboard() {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
+                </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-400">
                   <Layers className="h-10 w-10 mb-2 opacity-20" />
-                  <p className="text-sm">该分类已至末级</p>
+                  <p className="text-sm">{drillPath.length > 0 ? '该分类已至末级' : '暂无问题解答分类数据'}</p>
                 </div>
               )}
             </div>
@@ -769,153 +678,8 @@ export default function CompleteDashboard() {
           </GlassCard>
         )}
 
-        {/* 三、投诉举报情况 */}
-        <SectionHeader title="三、投诉举报情况" step="03" />
-        <GlassCard icon={MessageSquareWarning}>
-          {reportData.complaintTotal > 0 ? (
-            <>
-              <div className="mb-6 text-slate-600 leading-8 text-base bg-rose-50/60 p-5 rounded-xl border border-rose-100 indent-8">
-                {formatDate(displayDateStart)}至{formatDate(displayDateEnd)}，全省共实际受理服务投诉
-                <span className="text-rose-600 font-bold text-2xl mx-2">{reportData.complaintTotal.toLocaleString()}</span>件。
-                投诉事项主要集中在以下方面：
-              </div>
-              <div className="grid grid-cols-3 gap-6">
-                <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
-                  <div className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                    <PieChartIcon size={15} className="text-rose-500" /> 投诉类型分布
-                  </div>
-                  <div className="h-[220px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={reportData.complaintTopics.slice(0, 6)} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={2} dataKey="value" nameKey="name">
-                          {reportData.complaintTopics.slice(0, 6).map((_: any, i: number) => (
-                            <Cell key={i} fill={['#f87171', '#fb923c', '#fbbf24', '#a78bfa', '#60a5fa', '#34d399'][i % 6]} />
-                          ))}
-                        </Pie>
-                        <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-                <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
-                  <div className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                    <MapPin size={15} className="text-rose-500" /> 投诉地市分布
-                  </div>
-                  <div className="h-[220px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={complaintByCity.slice(0, 8)} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                        <XAxis
-                          dataKey="name"
-                          tick={{ fontSize: 10, fill: '#64748b' }}
-                          axisLine={false}
-                          tickLine={false}
-                          interval={0}
-                        />
-                        <YAxis
-                          tick={{ fontSize: 10, fill: '#94a3b8' }}
-                          axisLine={false}
-                          tickLine={false}
-                        />
-                        <Tooltip
-                          contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                          cursor={{ fill: '#f1f5f9' }}
-                          formatter={(value) => [`${value} 件`, '投诉量']}
-                        />
-                        <Bar dataKey="value" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={30} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-                <HotTopicTable data={reportData.complaintTopics} title="投诉热点统计表" />
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-10 text-slate-400">
-              <ShieldCheck className="w-10 h-10 text-emerald-300 mb-3" />
-              <p className="text-base font-medium text-emerald-600">本期暂未检测到投诉工单</p>
-              <p className="text-sm text-slate-400 mt-1 text-center max-w-md">
-                系统通过"业务类别/业务类型含'投诉'或'举报'"以及"举报二级分类/举报小类字段非空"自动识别。
-              </p>
-            </div>
-          )}
-        </GlassCard>
-
-        {/* ─────────── 涉税投诉来电情况 ─────────── */}
-        <GlassCard icon={MessageSquareWarning}>
-          {taxComplaintTotal > 0 ? (
-            <>
-              <div className="mb-6 text-slate-600 leading-8 text-base bg-amber-50/60 p-5 rounded-xl border border-amber-100 indent-8">
-                {formatDate(displayDateStart)}至{formatDate(displayDateEnd)}，全省共受理涉税投诉举报
-                <span className="text-amber-600 font-bold text-2xl mx-2">{taxComplaintTotal.toLocaleString()}</span>件。
-                涉税投诉举报事项主要集中在以下方面：
-              </div>
-              <div className="grid grid-cols-3 gap-6">
-                <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
-                  <div className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                    <PieChartIcon size={15} className="text-amber-500" /> 涉税投诉举报类型分布
-                  </div>
-                  <div className="h-[220px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={taxComplaintTopics.slice(0, 6)} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={2} dataKey="value" nameKey="name">
-                          {taxComplaintTopics.slice(0, 6).map((_: any, i: number) => (
-                            <Cell key={i} fill={['#f59e0b', '#fbbf24', '#fcd34d', '#f87171', '#fb923c', '#fca5a5'][i % 6]} />
-                          ))}
-                        </Pie>
-                        <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-                <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
-                  <div className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                    <MapPin size={15} className="text-amber-500" /> 涉税投诉举报地市分布
-                  </div>
-                  <div className="h-[220px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={taxComplaintByCity.slice(0, 8)} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                        <XAxis
-                          dataKey="name"
-                          tick={{ fontSize: 10, fill: '#64748b' }}
-                          axisLine={false}
-                          tickLine={false}
-                          interval={0}
-                        />
-                        <YAxis
-                          tick={{ fontSize: 10, fill: '#94a3b8' }}
-                          axisLine={false}
-                          tickLine={false}
-                        />
-                        <Tooltip
-                          contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                          cursor={{ fill: '#f1f5f9' }}
-                          formatter={(value) => [`${value} 件`, '涉税投诉举报量']}
-                        />
-                        <Bar dataKey="value" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={30} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-                <HotTopicTable data={taxComplaintTopics} title="涉税投诉举报热点统计表" />
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-10 text-slate-400">
-              <ShieldCheck className="w-10 h-10 text-emerald-300 mb-3" />
-              <p className="text-base font-medium text-emerald-600">本期暂未检测到涉税投诉工单</p>
-              <p className="text-sm text-slate-400 mt-1 text-center max-w-md">
-                系统从"涉税投诉"业务大类下统计二级分类数据，包括发票、申报、优惠、征收、退税等涉税事项。
-              </p>
-            </div>
-          )}
-        </GlassCard>
-
-
-
-        {/* 四、来电量情况 */}
-        <SectionHeader title="四、来电量情况" step="04" />
+        {/* 三、来电量情况 */}
+        <SectionHeader title="三、来电量情况" step="03" />
 
         <div className="grid grid-cols-2 gap-6 mb-8 mt-6">
           {/* 同比对比图：仅当后端有真实历史数据时展示 */}
