@@ -20,6 +20,10 @@ const COLORS = [
   '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
 ];
 
+// 来电量板块使用用户确认的渠道名称，保留原始数据键和统计数量。
+const callVolumeChannelLabel = (name: string): string =>
+  name === '12366热线' ? '办税服务厅线' : name;
+
 // ==========================================
 // 2. 工具函数（仅保留 UI 层必要的格式化，不做数据聚合）
 // ==========================================
@@ -129,7 +133,7 @@ export default function CompleteDashboard() {
   // ── 渠道状态卡片数据：直接从后端 channelSummary 读取，不再硬编码 ──
   const hotlineStatus = useMemo(() =>
     callVolumeChannelSummary.map((ch: any) => ({
-      name: ch.name,
+      name: callVolumeChannelLabel(ch.name),
       value: ch.total,
       percent: callVolumeMeta.totalRecords > 0 ? ((ch.total / callVolumeMeta.totalRecords) * 100).toFixed(1) : '0.0',
     })),
@@ -141,7 +145,7 @@ export default function CompleteDashboard() {
     callVolumeChannelSummary
       .filter((ch: any) => ch.prevTotal != null)  // 没有历史数据时不展示
       .map((ch: any) => ({
-        name: ch.name,
+        name: callVolumeChannelLabel(ch.name),
         当期: ch.total,
         同期: ch.prevTotal,
       })),
@@ -709,7 +713,7 @@ export default function CompleteDashboard() {
               <div className="w-full h-full pt-4 pb-2 pr-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={callVolumeChannelSummary.map((c: any) => ({ name: c.name, 业务量: c.total }))}
+                    data={callVolumeChannelSummary.map((c: any) => ({ name: callVolumeChannelLabel(c.name), 业务量: c.total }))}
                     margin={{ top: 10, right: 0, left: 0, bottom: 0 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
