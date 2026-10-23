@@ -267,7 +267,7 @@ export default function CompleteDashboard() {
         <div className="max-w-[1200px] mx-auto px-6 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-              <Terminal className="text-sky-500" size={20} /> 山东税务12366热线诉求分析{meta.periodType === 'quarter' ? '季报' : '周报'}
+              <Terminal className="text-sky-500" size={20} /> 山东省办税服务厅线数据分析报告
             </h1>
             <p className="text-xs text-slate-500 font-mono mt-1">
               系统生成报表 | 载入明细 {meta.totalRecords.toLocaleString()} 条
