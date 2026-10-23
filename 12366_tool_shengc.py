@@ -268,7 +268,7 @@ def load_detail_file(file_path, channel_name):
         ext = os.path.splitext(file_path)[-1].lower()
         df = read_csv_safe(file_path) if ext == '.csv' else read_excel_compat(file_path)
 
-        if channel_name == '12366热线':
+        if channel_name == '办税服务厅线':
             df, adapted = adapt_tool_analysis_table(df)
             if adapted:
                 df['数据来源渠道'] = channel_name
@@ -808,7 +808,7 @@ def generate_offline_report(data_12366_path, template_path, output_dir, progress
     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始生成12366工具分类版月报...")
 
     if progress_cb: progress_cb(5, "正在读取 12366 明细表...")
-    df_12366 = load_detail_file(data_12366_path, '12366热线')
+    df_12366 = load_detail_file(data_12366_path, '办税服务厅线')
 
     if df_12366.empty:
         print("❌ 错误：12366 明细数据未成功加载，无法生成报告！")
@@ -906,7 +906,7 @@ class RedirectText(object):
 class ReportApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("山东税务12366热线诉求分析月报（工具分类版）v1.0")
+        self.root.title("山东税务办税服务厅线诉求分析月报（工具分类版）v1.0")
         self.root.geometry("720x650")  # 增加了高度以容纳进度条
         self.root.configure(bg="#F3F3F3", padx=20, pady=20)
         
@@ -944,7 +944,7 @@ class ReportApp:
         header_frame = ttk.Frame(self.root)
         header_frame.pack(fill="x", pady=(0, 15))
         
-        title_lbl = tk.Label(header_frame, text="山东税务12366热线诉求分析月报", font=("Microsoft YaHei", 16, "bold"), bg="#F3F3F3", fg="#333333")
+        title_lbl = tk.Label(header_frame, text="山东税务办税服务厅线诉求分析月报", font=("Microsoft YaHei", 16, "bold"), bg="#F3F3F3", fg="#333333")
         title_lbl.pack(anchor="w")
         
         desc_lbl = tk.Label(header_frame, text="读取本月与上月12366工具分类结果，沿用12366定版模板生成月报。", font=("Microsoft YaHei", 9), bg="#F3F3F3", fg="#666666")

@@ -1,14 +1,14 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
-import { 
-  Activity, MapPin, ChevronRight, Database, TrendingUp, 
-  ChevronLeft, Layers, X, 
-  PieChart as PieChartIcon, ArrowUpRight, ArrowDownRight, 
-  PhoneCall, Terminal, ShieldCheck, Target, 
+import {
+  Activity, MapPin, ChevronRight, Database, TrendingUp,
+  ChevronLeft, Layers, X,
+  PieChart as PieChartIcon, ArrowUpRight, ArrowDownRight,
+  PhoneCall, Terminal, ShieldCheck, Target,
   MessageSquareWarning, Zap, Info
 } from 'lucide-react';
-import { 
+import {
   BarChart, Bar, PieChart, Pie, Cell, Tooltip, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Legend
 } from 'recharts';
 
@@ -125,7 +125,7 @@ const extractSecondNodes = (rawType: string): string[] => {
     const node2 = nodes[1] || nodes[0] || '';
     if (node2) results.push(node2);
   });
-  return [...new Set(results)]; 
+  return [...new Set(results)];
 };
 
 // ==========================================
@@ -135,7 +135,7 @@ export default function CompleteDashboard() {
   const [selectedDistrict, setSelectedDistrict] = useState<string | null>(null);
   const [drillPath, setDrillPath] = useState<string[]>([]);
   const [expandedCities, setExpandedCities] = useState<Record<string, boolean>>({});
-  const [activeChannelTab, setActiveChannelTab] = useState<'12366热线' | '办税服务厅'>('12366热线');
+  const [activeChannelTab, setActiveChannelTab] = useState<'办税服务厅线' | '办税服务厅'>('办税服务厅线');
   const [expandedInsights, setExpandedInsights] = useState<Record<number, boolean>>({});
 
   // ==============================================================
@@ -185,11 +185,11 @@ export default function CompleteDashboard() {
       channelSummary,
       channelChartData,
       hotlineStatus: [
-        { name: '12366热线', value: Math.round(totalRecords * 0.40), percent: 40.0, answerRate: 96.5 },
+        { name: '办税服务厅线', value: Math.round(totalRecords * 0.40), percent: 40.0, answerRate: 96.5 },
         { name: '办税服务厅', value: Math.round(totalRecords * 0.60), percent: 60.0, answerRate: 94.2 },
       ],
       channelComparisonData: [
-        { name: '12366热线', 当期: Math.round(totalRecords * 0.40), 同期: Math.round(totalRecords * 0.40 * 0.92) },
+        { name: '办税服务厅线', 当期: Math.round(totalRecords * 0.40), 同期: Math.round(totalRecords * 0.40 * 0.92) },
         { name: '办税服务厅', 当期: Math.round(totalRecords * 0.60), 同期: Math.round(totalRecords * 0.60 * 1.05) },
       ],
       tableEtax: generateTableData(baseData.locationList.slice(0, 3), false),
@@ -206,7 +206,7 @@ export default function CompleteDashboard() {
         ...item,
         '问题发生地': item.loc,
         '登记日期_Parsed': parseStringDate(item.date),
-        '_cats': splitItems(cat).length > 0 ? splitItems(cat) : ['未知大类'], 
+        '_cats': splitItems(cat).length > 0 ? splitItems(cat) : ['未知大类'],
         '_microCats': extractMicroCats(rawType),
         '_secondNodes': extractSecondNodes(rawType),
       };
@@ -225,7 +225,7 @@ export default function CompleteDashboard() {
     interactiveRows.forEach((row: any) => {
       const loc = row['问题发生地'];
       if (!loc || loc === '未知' || loc === '外省' || loc === '山东省内(未指明市)') return;
-      
+
       if (!cityCounts[loc]) cityCounts[loc] = { total: 0, issues: {} };
       cityCounts[loc].total += row.count;
 
@@ -278,7 +278,7 @@ export default function CompleteDashboard() {
 
   const channelTabData = useMemo(() => {
     if (!reportData) return { summary: [], chartData: [], anomalies: [] };
-    const is12366 = activeChannelTab === '12366热线';
+    const is12366 = activeChannelTab === '办税服务厅线';
     const displayRatio = is12366 ? 0.4 : 0.6;
 
     let tabSummary = reportData.channelSummary.map((ch: any) => ({
@@ -341,7 +341,7 @@ export default function CompleteDashboard() {
         let current = tree;
         nodes.forEach(node => {
           if (!current[node]) current[node] = { value: 0, children: {} };
-          current[node].value += row.count; 
+          current[node].value += row.count;
           current = current[node].children;
         });
       });
@@ -360,12 +360,12 @@ export default function CompleteDashboard() {
   // 交互事件
   // ==========================================
   const clearAllFilters = () => {
-    setSelectedDistrict(null); 
+    setSelectedDistrict(null);
     setDrillPath([]);
-    setActiveChannelTab('12366热线');
+    setActiveChannelTab('办税服务厅线');
   };
   const handleDistrictClick = (districtId: string) => {
-    setSelectedDistrict(prev => prev === districtId ? null : districtId); 
+    setSelectedDistrict(prev => prev === districtId ? null : districtId);
     setDrillPath([]);
   };
 
@@ -423,7 +423,7 @@ export default function CompleteDashboard() {
             <span className="text-sky-600 font-bold text-xl mx-1">{reportData.totalCalls.toLocaleString()}</span>通。估算分流渠道质效情况如下：
           </div>
         </GlassCard>
-        
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 mt-6">
           <GlassCard title="各渠道业务量同比对比" icon={Activity} className="h-[320px]">
             <div className="w-full h-full pt-4 pb-2 pr-4">
@@ -437,8 +437,8 @@ export default function CompleteDashboard() {
                     cursor={{ fill: '#f1f5f9' }}
                     formatter={(value, name) => [`${value?.toLocaleString()} 件`, name]}
                   />
-                  <Legend 
-                    wrapperStyle={{ paddingTop: '15px' }} 
+                  <Legend
+                    wrapperStyle={{ paddingTop: '15px' }}
                     iconType="circle"
                   />
                   <Bar dataKey="同期" name="去年同期" fill="#94a3b8" radius={[6, 6, 0, 0]} maxBarSize={50} />
@@ -450,9 +450,9 @@ export default function CompleteDashboard() {
 
           <div className="flex flex-col gap-6 h-[320px]">
             {reportData.hotlineStatus.map((item: any, idx: number) => (
-              <div 
-                key={idx} 
-                onClick={() => setActiveChannelTab(item.name as '12366热线' | '办税服务厅')}
+              <div
+                key={idx}
+                onClick={() => setActiveChannelTab(item.name as '办税服务厅线' | '办税服务厅')}
                 className={`bg-white border rounded-2xl p-5 flex flex-col relative overflow-hidden shadow-sm hover:shadow-md transition-all cursor-pointer flex-1 ${
                   activeChannelTab === item.name ? 'border-sky-500 ring-2 ring-sky-200' : 'border-slate-200'
                 }`}
@@ -484,21 +484,21 @@ export default function CompleteDashboard() {
         <GlassCard title="各地市来电总量分布" icon={MapPin} className="mb-6">
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart 
-                data={reportData.tableHall.slice(1).map((row: any) => ({ name: row.name, value: row.human + row.voice })).sort((a: any, b: any) => b.value - a.value)} 
+              <BarChart
+                data={reportData.tableHall.slice(1).map((row: any) => ({ name: row.name, value: row.human + row.voice })).sort((a: any, b: any) => b.value - a.value)}
                 margin={{ top: 10, right: 30, left: 0, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis 
-                  dataKey="name" 
-                  tick={{ fontSize: 11, fill: '#64748b' }} 
-                  axisLine={false} 
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 11, fill: '#64748b' }}
+                  axisLine={false}
                   tickLine={false}
                   interval={0}
                 />
-                <YAxis 
-                  tick={{ fontSize: 11, fill: '#94a3b8' }} 
-                  axisLine={false} 
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#94a3b8' }}
+                  axisLine={false}
                   tickLine={false}
                 />
                 <Tooltip
@@ -604,7 +604,7 @@ export default function CompleteDashboard() {
         {/* ===== 篇章二：咨询需求与重点专项分析 ===== */}
         <SectionHeader title="二、咨询需求情况分析" step="02" />
         <GlassCard icon={PhoneCall}>
-          
+
           <div className="mb-4 text-slate-600 leading-8 text-base bg-slate-50 p-5 rounded-xl border border-slate-100">
             {(() => {
               const sorted = [...reportData.channelSummary].sort((a, b) => b.total - a.total);
@@ -649,14 +649,14 @@ export default function CompleteDashboard() {
           </div>
 
           <div className="flex gap-4 mb-6 border-b border-slate-100 pb-3">
-            <button 
-              onClick={() => setActiveChannelTab('12366热线')} 
-              className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeChannelTab === '12366热线' ? 'bg-sky-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+            <button
+              onClick={() => setActiveChannelTab('办税服务厅线')}
+              className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeChannelTab === '办税服务厅线' ? 'bg-sky-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
             >
-              12366热线
+              办税服务厅线
             </button>
-            <button 
-              onClick={() => setActiveChannelTab('办税服务厅')} 
+            <button
+              onClick={() => setActiveChannelTab('办税服务厅')}
               className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeChannelTab === '办税服务厅' ? 'bg-sky-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
             >
               办税服务厅
@@ -793,7 +793,7 @@ export default function CompleteDashboard() {
               <Zap size={20} className="text-amber-500" />
               <h3 className="text-lg font-bold text-slate-800">重点专项业务汇总 ({activeChannelTab})</h3>
             </div>
-            
+
             <div className="mb-6 text-slate-600 text-sm bg-slate-50 p-4 rounded-xl border border-slate-100">
               <p className="flex items-center gap-2 font-medium mb-2 text-slate-700">
                 <Info size={16} className="text-amber-500" />
@@ -804,17 +804,17 @@ export default function CompleteDashboard() {
                 <li>若上述字段未检索到，则自动进入<strong>业务内容</strong>进行二次查漏补缺，以确保统计精准。</li>
               </ul>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {specialTopicStats.map((topic: any, i: number) => (
                 <div key={i} className="bg-white border border-slate-200 p-5 rounded-xl shadow-sm flex flex-col relative transition-all hover:shadow-md hover:border-sky-200 group">
                   <div className="absolute top-0 left-0 w-full h-1.5" style={{ backgroundColor: topic.color }}></div>
-                  
+
                   <div className="flex items-center gap-2 mb-4 mt-1">
                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: topic.color }}></div>
                     <span className="text-slate-700 font-bold text-base">{topic.label} 专项咨询</span>
                   </div>
-                  
+
                   <div className="mb-5 bg-slate-50/70 rounded-lg p-5 border border-slate-100 flex flex-col items-center justify-center">
                     <div className="text-slate-500 text-xs mb-1 font-medium">本周咨询量</div>
                     <div className="flex items-baseline gap-1">
@@ -1012,9 +1012,9 @@ export default function CompleteDashboard() {
                       <span className="text-slate-500">全省均值: {insight.provincialRate}</span>
                       <span className="font-bold text-emerald-600 bg-emerald-100 px-2 py-1 rounded">该市: {insight.bestCityRate}</span>
                     </div>
-                    
+
                     {/* 折叠面板按钮 */}
-                    <button 
+                    <button
                       onClick={() => setExpandedInsights(prev => ({ ...prev, [idx]: !prev[idx] }))}
                       className="w-full flex items-center justify-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50/50 py-1.5 border-t border-indigo-50 mt-3 transition-colors rounded-b-lg"
                     >

@@ -229,10 +229,10 @@ def choose_quarter(df, target=None):
         return date(year, (part - 1) * 3 + 1, 1)
     col = find_unified_date_column(df)
     if not col:
-        raise ValueError('12366明细中没有日期列')
+        raise ValueError('办税服务厅线明细中没有日期列')
     dates = parse_period_dates(df[col]).dropna()
     if dates.empty:
-        raise ValueError('12366明细中没有有效日期')
+        raise ValueError('办税服务厅线明细中没有有效日期')
     return quarter_start(dates.max().date())
 
 def filter_to_quarter(df, start):
@@ -248,7 +248,7 @@ def build_quarter_data(df_12366, target=None, progress_cb=None):
     start = choose_quarter(df_12366, target)
     current = filter_to_quarter(df_12366, start)
     if current.empty:
-        raise ValueError('所选季度没有12366明细')
+        raise ValueError('所选季度没有办税服务厅线明细')
     # 沿用6月8日原有分类与统计函数，只更换日期筛选范围。
     report = build_report_data(current, progress_cb=progress_cb)
     if not report['meta']['totalRecords']:
@@ -672,13 +672,13 @@ def build_report_data(df, progress_cb=None):
 # ==========================================
 def generate_offline_report(data_12366_path, template_path, output_dir,
                             progress_cb=None, period_type='week', target_quarter=None):
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始生成12366报表...")
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始生成办税服务厅线报表...")
 
-    if progress_cb: progress_cb(5, "正在读取 12366 明细表...")
-    df_12366 = load_detail_file(data_12366_path, '12366热线')
+    if progress_cb: progress_cb(5, "正在读取 办税服务厅线明细表...")
+    df_12366 = load_detail_file(data_12366_path, '办税服务厅线')
 
     if df_12366.empty:
-        print("❌ 错误：12366明细数据未成功加载，无法生成报告！")
+        print("❌ 错误：办税服务厅线明细数据未成功加载，无法生成报告！")
         return False
 
     if period_type == 'quarter':
@@ -698,7 +698,7 @@ def generate_offline_report(data_12366_path, template_path, output_dir,
     else:
         raise ValueError('报告周期只能为 week 或 quarter')
 
-    if progress_cb: progress_cb(75, "正在生成12366来电量指标...")
+    if progress_cb: progress_cb(75, "正在生成办税服务厅线来电量指标...")
     report_data['callVolume'] = call_volume_data
 
     if progress_cb: progress_cb(85, "数据处理完毕，正在嵌入 HTML 网页模板...")
@@ -709,8 +709,6 @@ def generate_offline_report(data_12366_path, template_path, output_dir,
         with open(template_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
 
-        if period_type == 'quarter':
-            html_content = html_content.replace('山东税务12366热线诉求分析周报', '山东税务12366热线诉求分析季报')
         if '<title>' in html_content:
             final_html = html_content.replace('<title>', injection + '<title>')
         elif '<head>' in html_content:
@@ -815,10 +813,10 @@ class ReportApp:
         header_frame = ttk.Frame(self.root)
         header_frame.pack(fill="x", pady=(0, 15))
 
-        title_lbl = tk.Label(header_frame, text="山东税务12366热线诉求分析周报", font=("Microsoft YaHei", 16, "bold"), bg="#F3F3F3", fg="#333333")
+        title_lbl = tk.Label(header_frame, text="山东省办税服务厅线数据分析报告", font=("Microsoft YaHei", 16, "bold"), bg="#F3F3F3", fg="#333333")
         title_lbl.pack(anchor="w")
 
-        desc_lbl = tk.Label(header_frame, text="选择12366咨询明细，一键生成周报或季报。", font=("Microsoft YaHei", 9), bg="#F3F3F3", fg="#666666")
+        desc_lbl = tk.Label(header_frame, text="选择办税服务厅线明细，一键生成周报或季报。", font=("Microsoft YaHei", 9), bg="#F3F3F3", fg="#666666")
         desc_lbl.pack(anchor="w", pady=(5, 0))
 
         form_frame = ttk.LabelFrame(self.root, text=" 数据源配置 ", style="Card.TLabelframe", padding=(15, 10))
@@ -855,7 +853,7 @@ class ReportApp:
         csv_types = [("CSV/Excel 文件", "*.csv *.xlsx *.xls")]
         html_types = [("HTML 网页模板", "*.html *.htm")]
 
-        add_row(form_frame, "12366咨询明细表 (CSV):", self.path_12366, filetypes=csv_types)
+        add_row(form_frame, "办税服务厅线明细表 (CSV):", self.path_12366, filetypes=csv_types)
 
         sep = ttk.Separator(form_frame, orient="horizontal")
         sep.pack(fill="x", pady=10)
@@ -951,7 +949,7 @@ if __name__ == "__main__":
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8', errors='replace')
-    parser = argparse.ArgumentParser(description='6月8日版12366周报 / 季报生成工具')
+    parser = argparse.ArgumentParser(description='办税服务厅线周报 / 季报生成工具')
     parser.add_argument('--input')
     parser.add_argument('--period', choices=('week', 'quarter'), default='week')
     parser.add_argument('--quarter', help='如2026-Q2；留空取最新季度')

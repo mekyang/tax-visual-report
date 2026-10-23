@@ -20,9 +20,6 @@ const COLORS = [
   '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
 ];
 
-// 来电量板块使用用户确认的渠道名称，保留原始数据键和统计数量。
-const callVolumeChannelLabel = (name: string): string =>
-  name === '12366热线' ? '办税服务厅线' : name;
 
 // ==========================================
 // 2. 工具函数（仅保留 UI 层必要的格式化，不做数据聚合）
@@ -103,7 +100,7 @@ const SectionHeader = ({ title, step }: { title: string; step: string }) => (
 export default function CompleteDashboard() {
   const [selectedDistrict, setSelectedDistrict]   = useState<string | null>(null);
   const [drillPath, setDrillPath]                 = useState<string[]>([]);
-  const [activeChannelTab, setActiveChannelTab]   = useState<string>('12366热线');
+  const [activeChannelTab, setActiveChannelTab]   = useState<string>('办税服务厅线');
   const [expandedInsights, setExpandedInsights]   = useState<Record<number, boolean>>({});
 
   // 直接读取后端预计算好的数据，不在前端做任何聚合
@@ -125,7 +122,7 @@ export default function CompleteDashboard() {
   const displayDateEnd = meta.periodEnd ?? meta.currentWeekEnd ?? meta.dateMax;
   const primaryHotlineCallTotal = useMemo(() => {
     const hotline = callVolumeChannelSummary.find((ch: any) =>
-      String(ch.name ?? '').includes('12366')
+      String(ch.name ?? '').includes('办税服务厅线')
     );
     return hotline?.total ?? meta.totalRecords;
   }, [callVolumeChannelSummary, meta.totalRecords]);
@@ -133,7 +130,7 @@ export default function CompleteDashboard() {
   // ── 渠道状态卡片数据：直接从后端 channelSummary 读取，不再硬编码 ──
   const hotlineStatus = useMemo(() =>
     callVolumeChannelSummary.map((ch: any) => ({
-      name: callVolumeChannelLabel(ch.name),
+      name: ch.name,
       value: ch.total,
       percent: callVolumeMeta.totalRecords > 0 ? ((ch.total / callVolumeMeta.totalRecords) * 100).toFixed(1) : '0.0',
     })),
@@ -145,7 +142,7 @@ export default function CompleteDashboard() {
     callVolumeChannelSummary
       .filter((ch: any) => ch.prevTotal != null)  // 没有历史数据时不展示
       .map((ch: any) => ({
-        name: callVolumeChannelLabel(ch.name),
+        name: ch.name,
         当期: ch.total,
         同期: ch.prevTotal,
       })),
@@ -256,7 +253,7 @@ export default function CompleteDashboard() {
   const clearAllFilters = useCallback(() => {
     setSelectedDistrict(null);
     setDrillPath([]);
-    setActiveChannelTab('12366热线');
+    setActiveChannelTab('办税服务厅线');
   }, []);
 
   return (
@@ -290,7 +287,7 @@ export default function CompleteDashboard() {
         <SectionHeader title="一、咨询需求情况分析" step="01" />
         <GlassCard icon={Database}>
           <div className="mb-6 text-slate-600 leading-relaxed text-base bg-slate-50 p-5 rounded-xl border border-slate-100 indent-8">
-            {formatDate(displayDateStart)}至{formatDate(displayDateEnd)}，本期监测周期内山东税务12366热线累计来电
+            {formatDate(displayDateStart)}至{formatDate(displayDateEnd)}，本期监测周期内山东税务办税服务厅线累计来电
             <span className="text-sky-600 font-bold text-xl mx-1">{primaryHotlineCallTotal.toLocaleString()}</span>通。咨询需求情况如下：
           </div>
         </GlassCard>
@@ -713,7 +710,7 @@ export default function CompleteDashboard() {
               <div className="w-full h-full pt-4 pb-2 pr-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={callVolumeChannelSummary.map((c: any) => ({ name: callVolumeChannelLabel(c.name), 业务量: c.total }))}
+                    data={callVolumeChannelSummary.map((c: any) => ({ name: c.name, 业务量: c.total }))}
                     margin={{ top: 10, right: 0, left: 0, bottom: 0 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
